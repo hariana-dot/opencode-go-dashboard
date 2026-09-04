@@ -22,12 +22,21 @@ interface Props {
   refreshToken: number;
 }
 
-function monthLabel(year: number, month: number, locale: string): string {
+function monthLabel(
+  year: number,
+  month: number,
+  locale: string,
+  monthStyle: "short" | "long" = "short"
+): string {
   return new Date(Date.UTC(year, month - 1, 1)).toLocaleString(locale, {
-    month: "long",
+    month: monthStyle,
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function padMonth(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 function formatAxisUsd(n: number): string {
@@ -64,24 +73,28 @@ export default function CostChart({ accountId, refreshToken }: Props) {
   const syncAll = useCallback(async () => {
     setSyncing(true);
     setError("");
+    const until = `${year}-${padMonth(month)}-01T00:00:00.000Z`;
     try {
       let cursor = 0;
-      for (let i = 0; i < 20; i++) {
-        const result = await syncUsageHistory(accountId, cursor);
+      for (let i = 0; i < 6; i++) {
+        const result = await syncUsageHistory(accountId, cursor, until);
         if (result.error) {
           setError(result.error);
           break;
         }
         cursor = result.nextCursor;
+        await load();
         if (result.done) break;
       }
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("syncFailed"));
     } finally {
       setSyncing(false);
     }
-  }, [accountId, load, t]);
+  }, [accountId, year, month, load, t]);
+
+  const syncAllRef = useRef(syncAll);
+  syncAllRef.current = syncAll;
 
   useEffect(() => {
     void load();
@@ -89,8 +102,8 @@ export default function CostChart({ accountId, refreshToken }: Props) {
 
   useEffect(() => {
     if (refreshToken === 0) return;
-    void syncAll();
-  }, [refreshToken, syncAll]);
+    void syncAllRef.current();
+  }, [refreshToken]);
 
   useEffect(() => {
     if (loading || syncing || !data || autoSynced.current) return;
@@ -169,22 +182,22 @@ export default function CostChart({ accountId, refreshToken }: Props) {
         {t("costHint")}
       </Text>
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        <div className="flex items-center gap-1 rounded-md border border-kumo-line">
+      <div className="mt-3 flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center rounded-md border border-kumo-line">
           <button
             type="button"
-            className="px-2 py-1.5 text-kumo-default"
+            className="shrink-0 px-1.5 py-1.5 text-kumo-default"
             onClick={() => shiftMonth(-1)}
             aria-label={t("prevPage")}
           >
             <CaretLeft size={14} />
           </button>
-          <span className="min-w-[9rem] px-2 text-center text-sm tabular-nums">
-            {monthLabel(year, month, localeTag(locale))}
+          <span className="min-w-0 flex-1 truncate px-1 text-center text-xs tabular-nums">
+            {monthLabel(year, month, localeTag(locale), "short")}
           </span>
           <button
             type="button"
-            className="px-2 py-1.5 text-kumo-default"
+            className="shrink-0 px-1.5 py-1.5 text-kumo-default"
             onClick={() => shiftMonth(1)}
             aria-label={t("nextPage")}
           >
@@ -192,7 +205,7 @@ export default function CostChart({ accountId, refreshToken }: Props) {
           </button>
         </div>
         <select
-          className="rounded-md border border-kumo-line bg-kumo-elevated px-2 py-1.5 text-sm"
+          className="w-[42%] max-w-[11rem] shrink-0 rounded-md border border-kumo-line bg-kumo-elevated px-1.5 py-1.5 text-xs"
           value={modelFilter}
           onChange={(e) => setModelFilter(e.target.value)}
         >
@@ -205,12 +218,12 @@ export default function CostChart({ accountId, refreshToken }: Props) {
         </select>
       </div>
 
-      {syncing || loading ? (
+      {!data && (loading || syncing) ? (
         <div className="flex items-center justify-center gap-2 py-10 text-sm text-kumo-subtle">
           <Loader />
           {syncing ? t("syncing") : t("loading")}
         </div>
-      ) : error ? (
+      ) : error && !data ? (
         <Text
           variant="secondary"
           as="p"
@@ -220,6 +233,12 @@ export default function CostChart({ accountId, refreshToken }: Props) {
         </Text>
       ) : (
         <div className="mt-3 overflow-x-auto">
+          {syncing ? (
+            <div className="mb-2 flex items-center gap-2 text-xs text-kumo-subtle">
+              <Loader />
+              {t("syncing")}
+            </div>
+          ) : null}
           <svg
             viewBox={`0 0 ${w} ${h}`}
             className="h-52 w-full min-w-[20rem] text-kumo-subtle"

@@ -10,15 +10,27 @@ import type {
 
 async function request<T>(
   path: string,
-  init?: RequestInit
+  init?: RequestInit & { timeoutMs?: number }
 ): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
+  const { timeoutMs, ...rest } = init ?? {};
+  const ctrl = new AbortController();
+  const timer =
+    timeoutMs && timeoutMs > 0
+      ? setTimeout(() => ctrl.abort(), timeoutMs)
+      : undefined;
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...rest,
+      signal: rest.signal ?? ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...rest.headers,
+      },
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   let data: T & { error?: string };
   try {
@@ -110,11 +122,14 @@ export async function fetchUsageHistory(
 
 export async function syncUsageHistory(
   id: string,
-  cursor: number = 0
+  cursor: number = 0,
+  until?: string
 ): Promise<UsageSyncResult> {
+  const params = new URLSearchParams({ cursor: String(cursor) });
+  if (until) params.set("until", until);
   const data = await request<UsageSyncResult>(
-    `/api/accounts/${id}/sync?cursor=${encodeURIComponent(cursor)}`,
-    { method: "POST" }
+    `/api/accounts/${id}/sync?${params}`,
+    { method: "POST", timeoutMs: 25000 }
   );
   return data;
 }

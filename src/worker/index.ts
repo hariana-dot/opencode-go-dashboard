@@ -28,7 +28,7 @@ import type {
   UsageResult,
 } from "./types";
 
-const SYNC_PAGES_PER_REQUEST = 6;
+const SYNC_PAGES_PER_REQUEST = 2;
 const HISTORY_PAGE_FULL = 40;
 
 export interface Env {
@@ -320,11 +320,14 @@ async function handleSyncHistory(
   let cursor =
     Number.isFinite(cursorParam) && cursorParam >= 0 ? cursorParam : 0;
 
+  const until = url.searchParams.get("until");
   const row = await getAccountRow(env.DB, id);
   if (!row) return json({ error: "账号不存在" }, 404);
 
   let inserted = 0;
   let done = false;
+  let oldest: string | null = null;
+  let lastSyncedAt: string | null = null;
   try {
     for (let i = 0; i < SYNC_PAGES_PER_REQUEST; i++) {
       const history = await fetchGoUsageHistory(
@@ -338,17 +341,26 @@ async function handleSyncHistory(
         break;
       }
       inserted += await upsertUsageRecords(env.DB, id, history.items);
+      for (const item of history.items) {
+        if (!oldest || item.timeCreated < oldest) oldest = item.timeCreated;
+      }
       cursor += 1;
+      lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
       if (history.items.length < HISTORY_PAGE_FULL) {
         done = true;
         break;
       }
+      if (until && oldest && oldest < until) {
+        done = true;
+        break;
+      }
     }
-    const lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
+    if (!lastSyncedAt) lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
     return json({
       inserted,
       nextCursor: cursor,
       done,
+      oldest,
       lastSyncedAt,
     });
   } catch (err) {
@@ -356,7 +368,8 @@ async function handleSyncHistory(
       inserted,
       nextCursor: cursor,
       done: false,
-      lastSyncedAt: null,
+      oldest,
+      lastSyncedAt,
       error: err instanceof Error ? err.message : "同步失败",
     });
   }

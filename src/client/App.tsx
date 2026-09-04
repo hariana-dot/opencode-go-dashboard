@@ -199,31 +199,33 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-5xl px-4 py-6 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Text variant="heading2" as="h1" DANGEROUS_className="m-0">
-            {t("title")}
-          </Text>
-          <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-1 text-sm">
-            {t("subtitle")}
-          </Text>
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-kumo-subtle">
-            <span>{t("accountsCount", { n: summary.total })}</span>
-            {summary.warn > 0 ? (
-              <span className="text-kumo-warning">
-                {t("nearLimit", { n: summary.warn })}
-              </span>
-            ) : null}
-            {summary.danger > 0 ? (
-              <span className="text-kumo-danger">
-                {t("needsAttention", { n: summary.danger })}
-              </span>
-            ) : null}
-          </div>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <Button variant="secondary" size="sm" icon={SignOut} onClick={handleLogout}>
+          {t("logout")}
+        </Button>
+        <PrefsToggles />
+      </div>
+      <header className="mb-6">
+        <Text variant="heading2" as="h1" DANGEROUS_className="m-0">
+          {t("title")}
+        </Text>
+        <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-1 text-sm">
+          {t("subtitle")}
+        </Text>
+        <div className="mt-2 flex flex-wrap gap-3 text-xs text-kumo-subtle">
+          <span>{t("accountsCount", { n: summary.total })}</span>
+          {summary.warn > 0 ? (
+            <span className="text-kumo-warning">
+              {t("nearLimit", { n: summary.warn })}
+            </span>
+          ) : null}
+          {summary.danger > 0 ? (
+            <span className="text-kumo-danger">
+              {t("needsAttention", { n: summary.danger })}
+            </span>
+          ) : null}
         </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <PrefsToggles />
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="primary"
             icon={ArrowsClockwise}
@@ -241,9 +243,6 @@ export default function App() {
             }}
           >
             {t("addAccount")}
-          </Button>
-          <Button variant="secondary" icon={SignOut} onClick={handleLogout}>
-            {t("logout")}
           </Button>
         </div>
       </header>

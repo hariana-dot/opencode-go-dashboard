@@ -79,6 +79,7 @@ export interface UsageSyncResult {
   inserted: number;
   nextCursor: number;
   done: boolean;
+  oldest: string | null;
   lastSyncedAt: string | null;
   error?: string;
 }
