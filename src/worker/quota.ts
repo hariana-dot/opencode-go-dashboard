@@ -101,8 +101,8 @@ export async function fetchGoQuota(
     fetchedAt: new Date().toISOString(),
   };
 
-  for (const [key, pattern] of Object.entries(USAGE_PATTERNS)) {
-    const match = html.match(pattern);
+  for (const key of ["rolling", "weekly", "monthly"] as const) {
+    const match = html.match(USAGE_PATTERNS[key]);
     if (match) {
       usage[key] = parseUsageObject(match[1]);
     }
@@ -211,7 +211,8 @@ function parseHistoryBody(body: string): UsageHistoryItem[] {
 export async function fetchGoUsageHistory(
   workspaceId: string,
   authCookie: string,
-  cursor: number = 0
+  cursor: number = 0,
+  allowEmpty = false
 ): Promise<UsageHistoryResult> {
   const wsError = validateWorkspaceId(workspaceId);
   if (wsError) throw new Error(wsError);
@@ -273,7 +274,7 @@ export async function fetchGoUsageHistory(
   }
 
   const items = parseHistoryBody(body);
-  if (items.length === 0) {
+  if (items.length === 0 && !allowEmpty) {
     throw new Error("未能解析到使用历史，OpenCode 接口结构可能已变更");
   }
 

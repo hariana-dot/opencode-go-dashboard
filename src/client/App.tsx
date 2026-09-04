@@ -5,6 +5,7 @@ import AccountDialog from "./components/AccountDialog";
 import AccountTable from "./components/AccountTable";
 import HistoryDialog from "./components/HistoryDialog";
 import LoginForm from "./components/LoginForm";
+import PrefsToggles from "./components/PrefsToggles";
 import {
   checkAuth,
   createAccount,
@@ -16,18 +17,23 @@ import {
   updateAccount,
 } from "./lib/api";
 import { usageStatus } from "./lib/format";
+import { usePrefs } from "./lib/prefs";
 import type { Account, AccountFormData, AccountWithUsage } from "./types";
 
 export default function App() {
+  const { t } = usePrefs();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<AccountWithUsage[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
+  const [chartToken, setChartToken] = useState(0);
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-  const [historyAccount, setHistoryAccount] = useState<AccountWithUsage | null>(null);
+  const [historyAccount, setHistoryAccount] = useState<AccountWithUsage | null>(
+    null
+  );
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
@@ -41,11 +47,11 @@ export default function App() {
         })
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void (async () => {
@@ -94,11 +100,10 @@ export default function App() {
     try {
       const results = await refreshAll();
       const map = new Map(results.map((a) => [a.id, a]));
-      setAccounts((prev) =>
-        prev.map((a) => map.get(a.id) ?? a)
-      );
+      setAccounts((prev) => prev.map((a) => map.get(a.id) ?? a));
+      setChartToken((n) => n + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "刷新失败");
+      setError(err instanceof Error ? err.message : t("refreshFailed"));
     } finally {
       setRefreshingAll(false);
     }
@@ -111,6 +116,7 @@ export default function App() {
       setAccounts((prev) =>
         prev.map((a) => (a.id === id ? { ...a, usage } : a))
       );
+      setChartToken((n) => n + 1);
     } catch (err) {
       setAccounts((prev) =>
         prev.map((a) =>
@@ -123,7 +129,7 @@ export default function App() {
                   monthly: null,
                   plan: null,
                   fetchedAt: new Date().toISOString(),
-                  error: err instanceof Error ? err.message : "查询失败",
+                  error: err instanceof Error ? err.message : t("queryFailed"),
                 },
               }
             : a
@@ -161,7 +167,7 @@ export default function App() {
   }
 
   async function handleDelete(account: AccountWithUsage) {
-    if (!confirm(`确定删除账号「${account.name}」？`)) return;
+    if (!confirm(t("deleteConfirm", { name: account.name }))) return;
     await deleteAccount(account.id);
     setAccounts((prev) => prev.filter((a) => a.id !== account.id));
   }
@@ -170,19 +176,24 @@ export default function App() {
     return (
       <div className="flex min-h-dvh items-center justify-center gap-3 text-kumo-subtle">
         <Loader />
-        加载中…
+        {t("loading")}
       </div>
     );
   }
 
   if (!authed) {
     return (
-      <LoginForm
-        onSuccess={async () => {
-          setAuthed(true);
-          await loadAccounts();
-        }}
-      />
+      <>
+        <div className="fixed right-3 top-3 z-50">
+          <PrefsToggles />
+        </div>
+        <LoginForm
+          onSuccess={async () => {
+            setAuthed(true);
+            await loadAccounts();
+          }}
+        />
+      </>
     );
   }
 
@@ -191,30 +202,35 @@ export default function App() {
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Text variant="heading2" as="h1" DANGEROUS_className="m-0">
-            OpenCode Go 额度管理
+            {t("title")}
           </Text>
           <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-1 text-sm">
-            团队多账号用量一览 · Cookie 仅存服务端
+            {t("subtitle")}
           </Text>
           <div className="mt-2 flex flex-wrap gap-3 text-xs text-kumo-subtle">
-            <span>共 {summary.total} 个账号</span>
+            <span>{t("accountsCount", { n: summary.total })}</span>
             {summary.warn > 0 ? (
-              <span className="text-kumo-warning">⚠ {summary.warn} 个接近上限</span>
+              <span className="text-kumo-warning">
+                {t("nearLimit", { n: summary.warn })}
+              </span>
             ) : null}
             {summary.danger > 0 ? (
-              <span className="text-kumo-danger">● {summary.danger} 个需关注</span>
+              <span className="text-kumo-danger">
+                {t("needsAttention", { n: summary.danger })}
+              </span>
             ) : null}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <PrefsToggles />
           <Button
             variant="primary"
             icon={ArrowsClockwise}
             onClick={handleRefreshAll}
             disabled={refreshingAll || accounts.length === 0}
           >
-            {refreshingAll ? "刷新中…" : "全部刷新"}
+            {refreshingAll ? t("refreshingAll") : t("refreshAll")}
           </Button>
           <Button
             variant="secondary"
@@ -224,10 +240,10 @@ export default function App() {
               setDialogOpen(true);
             }}
           >
-            添加账号
+            {t("addAccount")}
           </Button>
           <Button variant="secondary" icon={SignOut} onClick={handleLogout}>
-            退出
+            {t("logout")}
           </Button>
         </div>
       </header>
@@ -245,12 +261,13 @@ export default function App() {
       {loading ? (
         <div className="flex items-center justify-center gap-3 py-16 text-kumo-subtle">
           <Loader />
-          加载账号…
+          {t("loadingAccounts")}
         </div>
       ) : (
         <AccountTable
           accounts={accounts}
           refreshingIds={refreshingIds}
+          chartToken={chartToken}
           onRefresh={handleRefreshOne}
           onEdit={(account) => {
             setEditingAccount(account);
@@ -282,7 +299,7 @@ export default function App() {
         as="p"
         DANGEROUS_className="m-0 mt-8 text-center text-xs"
       >
-        额度数据来自 opencode.ai Dashboard 页面解析，Cookie 过期后需重新复制更新
+        {t("footer")}
       </Text>
     </div>
   );

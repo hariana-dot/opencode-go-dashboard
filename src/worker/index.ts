@@ -8,8 +8,11 @@ import {
   createAccount,
   deleteAccount,
   getAccountRow,
+  getUsageOverview,
   listAccounts,
+  saveUsageSync,
   updateAccount,
+  upsertUsageRecords,
 } from "./db";
 import {
   fetchGoQuota,
@@ -24,6 +27,9 @@ import type {
   UsageHistoryItem,
   UsageResult,
 } from "./types";
+
+const SYNC_PAGES_PER_REQUEST = 6;
+const HISTORY_PAGE_FULL = 40;
 
 export interface Env {
   ASSETS: Fetcher;
@@ -102,6 +108,18 @@ async function handleApi(
   );
   if (historyMatch && request.method === "GET") {
     return handleHistory(request, env, historyMatch[1]);
+  }
+
+  const syncMatch = url.pathname.match(/^\/api\/accounts\/([^/]+)\/sync$/);
+  if (syncMatch && request.method === "POST") {
+    return handleSyncHistory(request, env, syncMatch[1]);
+  }
+
+  const overviewMatch = url.pathname.match(
+    /^\/api\/accounts\/([^/]+)\/overview$/
+  );
+  if (overviewMatch && request.method === "GET") {
+    return handleOverview(request, env, overviewMatch[1]);
   }
 
   if (url.pathname === "/api/refresh" && request.method === "POST") {
@@ -289,6 +307,92 @@ async function handleHistory(
       error: err instanceof Error ? err.message : "查询历史失败",
     };
     return json({ id, history });
+  }
+}
+
+async function handleSyncHistory(
+  request: Request,
+  env: Env,
+  id: string
+): Promise<Response> {
+  const url = new URL(request.url);
+  const cursorParam = Number(url.searchParams.get("cursor") ?? "0");
+  let cursor =
+    Number.isFinite(cursorParam) && cursorParam >= 0 ? cursorParam : 0;
+
+  const row = await getAccountRow(env.DB, id);
+  if (!row) return json({ error: "账号不存在" }, 404);
+
+  let inserted = 0;
+  let done = false;
+  try {
+    for (let i = 0; i < SYNC_PAGES_PER_REQUEST; i++) {
+      const history = await fetchGoUsageHistory(
+        row.workspace_id,
+        row.auth_cookie,
+        cursor,
+        true
+      );
+      if (history.items.length === 0) {
+        done = true;
+        break;
+      }
+      inserted += await upsertUsageRecords(env.DB, id, history.items);
+      cursor += 1;
+      if (history.items.length < HISTORY_PAGE_FULL) {
+        done = true;
+        break;
+      }
+    }
+    const lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
+    return json({
+      inserted,
+      nextCursor: cursor,
+      done,
+      lastSyncedAt,
+    });
+  } catch (err) {
+    return json({
+      inserted,
+      nextCursor: cursor,
+      done: false,
+      lastSyncedAt: null,
+      error: err instanceof Error ? err.message : "同步失败",
+    });
+  }
+}
+
+async function handleOverview(
+  request: Request,
+  env: Env,
+  id: string
+): Promise<Response> {
+  const url = new URL(request.url);
+  const now = new Date();
+  const yearParam = Number(url.searchParams.get("year") ?? now.getUTCFullYear());
+  const monthParam = Number(
+    url.searchParams.get("month") ?? now.getUTCMonth() + 1
+  );
+  const year =
+    Number.isFinite(yearParam) && yearParam >= 2020 && yearParam <= 2100
+      ? Math.floor(yearParam)
+      : now.getUTCFullYear();
+  const month =
+    Number.isFinite(monthParam) && monthParam >= 1 && monthParam <= 12
+      ? Math.floor(monthParam)
+      : now.getUTCMonth() + 1;
+
+  const row = await getAccountRow(env.DB, id);
+  if (!row) return json({ error: "账号不存在" }, 404);
+
+  try {
+    const overview = await getUsageOverview(env.DB, id, year, month);
+    return json({ id, overview });
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : "查询概览失败" },
+      500
+    );
   }
 }
 

@@ -25,13 +25,13 @@ export default class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
           <Text variant="heading3" as="h1" DANGEROUS_className="m-0">
-            页面加载出错
+            This page crashed
           </Text>
           <Text variant="secondary" as="p" DANGEROUS_className="m-0 max-w-md">
             {this.state.error}
           </Text>
           <Button variant="primary" onClick={() => window.location.reload()}>
-            刷新页面
+            Reload
           </Button>
         </div>
       );

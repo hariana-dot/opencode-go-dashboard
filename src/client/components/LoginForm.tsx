@@ -1,12 +1,14 @@
 import { Button, Label, SensitiveInput, Text } from "@cloudflare/kumo";
 import { useState } from "react";
 import { login } from "../lib/api";
+import { usePrefs } from "../lib/prefs";
 
 interface Props {
   onSuccess: () => void;
 }
 
 export default function LoginForm({ onSuccess }: Props) {
+  const { t } = usePrefs();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,7 +21,7 @@ export default function LoginForm({ onSuccess }: Props) {
       await login(password);
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
+      setError(err instanceof Error ? err.message : t("loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -32,14 +34,14 @@ export default function LoginForm({ onSuccess }: Props) {
         className="w-full max-w-sm rounded-lg border border-kumo-line bg-kumo-elevated p-6 shadow-sm"
       >
         <Text variant="heading3" as="h1" DANGEROUS_className="m-0">
-          OpenCode Go 额度管理
+          {t("loginTitle")}
         </Text>
         <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-2 text-sm">
-          输入管理密码以查看团队账号用量。Cookie 仅保存在服务端 D1，不会返回给浏览器。
+          {t("loginHint")}
         </Text>
 
         <div className="mt-5 flex flex-col gap-1.5">
-          <Label htmlFor="admin-password">管理密码</Label>
+          <Label htmlFor="admin-password">{t("adminPassword")}</Label>
           <SensitiveInput
             id="admin-password"
             value={password}
@@ -66,7 +68,7 @@ export default function LoginForm({ onSuccess }: Props) {
           className="mt-5 w-full"
           disabled={loading || !password}
         >
-          {loading ? "登录中…" : "登录"}
+          {loading ? t("loggingIn") : t("login")}
         </Button>
       </form>
     </div>

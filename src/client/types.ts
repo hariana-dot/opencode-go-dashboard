@@ -56,3 +56,29 @@ export interface AccountFormData {
   authCookie: string;
   notes: string;
 }
+
+export interface UsageDayModelCost {
+  date: string;
+  model: string;
+  cost: number;
+}
+
+export interface UsageOverviewResult {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  series: UsageDayModelCost[];
+  models: string[];
+  keys: string[];
+  lastSyncedAt: string | null;
+}
+
+export interface UsageSyncResult {
+  inserted: number;
+  nextCursor: number;
+  done: boolean;
+  lastSyncedAt: string | null;
+  error?: string;
+}
+
+export const COST_SCALE = 1_000_000_000;

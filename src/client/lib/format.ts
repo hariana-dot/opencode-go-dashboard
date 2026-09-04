@@ -1,17 +1,24 @@
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds} 秒`;
+import type { Locale } from "./i18n";
+import { t } from "./i18n";
+
+export function formatDuration(seconds: number, locale: Locale): string {
+  if (seconds < 60) return t(locale, "sec", { n: seconds });
   if (seconds < 3600) {
     const mins = Math.floor(seconds / 60);
-    return `${mins} 分钟`;
+    return t(locale, "min", { n: mins });
   }
   if (seconds < 86400) {
     const hours = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
-    return mins > 0 ? `${hours} 小时 ${mins} 分` : `${hours} 小时`;
+    return mins > 0
+      ? t(locale, "hourMin", { h: hours, m: mins })
+      : t(locale, "hour", { n: hours });
   }
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
-  return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`;
+  return hours > 0
+    ? t(locale, "dayHour", { d: days, h: hours })
+    : t(locale, "day", { n: days });
 }
 
 export function usageStatus(percent: number): "ok" | "warn" | "danger" {

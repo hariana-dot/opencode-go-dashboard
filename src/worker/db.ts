@@ -3,6 +3,8 @@ import type {
   AccountRow,
   CreateAccountBody,
   UpdateAccountBody,
+  UsageHistoryItem,
+  UsageOverviewResult,
 } from "./types";
 
 function toPublic(row: AccountRow): AccountPublic {
@@ -95,9 +97,151 @@ export async function deleteAccount(
   db: D1Database,
   id: string
 ): Promise<boolean> {
+  await db.prepare("DELETE FROM usage_records WHERE account_id = ?").bind(id).run();
+  await db.prepare("DELETE FROM usage_sync WHERE account_id = ?").bind(id).run();
   const result = await db
     .prepare("DELETE FROM accounts WHERE id = ?")
     .bind(id)
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+export async function upsertUsageRecords(
+  db: D1Database,
+  accountId: string,
+  items: UsageHistoryItem[]
+): Promise<number> {
+  if (items.length === 0) return 0;
+  const stmt = db.prepare(
+    `INSERT INTO usage_records (
+      id, account_id, time_created, model, provider,
+      input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
+      cache_write_5m_tokens, cache_write_1h_tokens, cost, key_id, session_id, plan
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, id) DO UPDATE SET
+      time_created = excluded.time_created,
+      model = excluded.model,
+      provider = excluded.provider,
+      input_tokens = excluded.input_tokens,
+      output_tokens = excluded.output_tokens,
+      reasoning_tokens = excluded.reasoning_tokens,
+      cache_read_tokens = excluded.cache_read_tokens,
+      cache_write_5m_tokens = excluded.cache_write_5m_tokens,
+      cache_write_1h_tokens = excluded.cache_write_1h_tokens,
+      cost = excluded.cost,
+      key_id = excluded.key_id,
+      session_id = excluded.session_id,
+      plan = excluded.plan`
+  );
+  const batch = items.map((item) =>
+    stmt.bind(
+      item.id,
+      accountId,
+      item.timeCreated,
+      item.model,
+      item.provider,
+      item.inputTokens,
+      item.outputTokens,
+      item.reasoningTokens,
+      item.cacheReadTokens,
+      item.cacheWrite5mTokens,
+      item.cacheWrite1hTokens,
+      item.cost,
+      item.keyID,
+      item.sessionID,
+      item.plan
+    )
+  );
+  await db.batch(batch);
+  return items.length;
+}
+
+export async function saveUsageSync(
+  db: D1Database,
+  accountId: string,
+  cursor: number
+): Promise<string> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO usage_sync (account_id, last_synced_at, last_cursor)
+       VALUES (?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET
+         last_synced_at = excluded.last_synced_at,
+         last_cursor = excluded.last_cursor`
+    )
+    .bind(accountId, now, cursor)
+    .run();
+  return now;
+}
+
+export async function getUsageSync(
+  db: D1Database,
+  accountId: string
+): Promise<{ lastSyncedAt: string | null; lastCursor: number }> {
+  const row = await db
+    .prepare(
+      "SELECT last_synced_at, last_cursor FROM usage_sync WHERE account_id = ?"
+    )
+    .bind(accountId)
+    .first<{ last_synced_at: string | null; last_cursor: number }>();
+  return {
+    lastSyncedAt: row?.last_synced_at ?? null,
+    lastCursor: row?.last_cursor ?? 0,
+  };
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+export async function getUsageOverview(
+  db: D1Database,
+  accountId: string,
+  year: number,
+  month: number
+): Promise<UsageOverviewResult> {
+  const start = `${year}-${pad(month)}-01T00:00:00.000Z`;
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const end = `${endYear}-${pad(endMonth)}-01T00:00:00.000Z`;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  const { results } = await db
+    .prepare(
+      `SELECT substr(time_created, 1, 10) AS day, model, key_id, SUM(cost) AS cost
+       FROM usage_records
+       WHERE account_id = ? AND time_created >= ? AND time_created < ?
+       GROUP BY day, model, key_id`
+    )
+    .bind(accountId, start, end)
+    .all<{ day: string; model: string; key_id: string; cost: number }>();
+
+  const rows = results ?? [];
+  const modelSet = new Set<string>();
+  const keySet = new Set<string>();
+  const merged = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.model) modelSet.add(row.model);
+    if (row.key_id) keySet.add(row.key_id);
+    const key = `${row.day}\t${row.model}`;
+    merged.set(key, (merged.get(key) ?? 0) + Number(row.cost ?? 0));
+  }
+
+  const series = [...merged.entries()].map(([key, cost]) => {
+    const [date, model] = key.split("\t");
+    return { date, model, cost };
+  });
+
+  const sync = await getUsageSync(db, accountId);
+  return {
+    year,
+    month,
+    daysInMonth,
+    series,
+    models: [...modelSet].sort(),
+    keys: [...keySet].sort(),
+    lastSyncedAt: sync.lastSyncedAt,
+  };
 }

@@ -1,0 +1,99 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { t, type Locale, type MessageKey } from "./i18n";
+
+export type Theme = "light" | "dark" | "system";
+
+const LOCALE_KEY = "ogc-locale";
+const THEME_KEY = "ogc-theme";
+
+function readLocale(): Locale {
+  const raw = localStorage.getItem(LOCALE_KEY);
+  if (raw === "en" || raw === "zh-CN" || raw === "zh-TW" || raw === "ja") {
+    return raw;
+  }
+  return "zh-CN";
+}
+
+function readTheme(): Theme {
+  const raw = localStorage.getItem(THEME_KEY);
+  if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  return "system";
+}
+
+function systemDark(): boolean {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function applyTheme(theme: Theme) {
+  const dark = theme === "dark" || (theme === "system" && systemDark());
+  const root = document.documentElement;
+  root.classList.toggle("dark", dark);
+  root.classList.toggle("light", !dark);
+  root.style.colorScheme = dark ? "dark" : "light";
+}
+
+interface Prefs {
+  locale: Locale;
+  theme: Theme;
+  setLocale: (locale: Locale) => void;
+  setTheme: (theme: Theme) => void;
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+}
+
+const PrefsContext = createContext<Prefs | null>(null);
+
+export function PrefsProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocaleState] = useState<Locale>(readLocale);
+  const [theme, setThemeState] = useState<Theme>(readTheme);
+
+  useEffect(() => {
+    applyTheme(theme);
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.title = t(locale, "title");
+  }, [locale]);
+
+  const setLocale = useCallback((next: Locale) => {
+    localStorage.setItem(LOCALE_KEY, next);
+    setLocaleState(next);
+  }, []);
+
+  const setTheme = useCallback((next: Theme) => {
+    localStorage.setItem(THEME_KEY, next);
+    setThemeState(next);
+  }, []);
+
+  const translate = useCallback(
+    (key: MessageKey, vars?: Record<string, string | number>) =>
+      t(locale, key, vars),
+    [locale]
+  );
+
+  const value = useMemo(
+    () => ({ locale, theme, setLocale, setTheme, t: translate }),
+    [locale, theme, setLocale, setTheme, translate]
+  );
+
+  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
+}
+
+export function usePrefs(): Prefs {
+  const ctx = useContext(PrefsContext);
+  if (!ctx) throw new Error("usePrefs must be used within PrefsProvider");
+  return ctx;
+}

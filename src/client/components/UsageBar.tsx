@@ -1,9 +1,6 @@
 import { Text } from "@cloudflare/kumo";
-import {
-  formatDuration,
-  usageBarColor,
-  usageTextColor,
-} from "../lib/format";
+import { formatDuration, usageBarColor, usageTextColor } from "../lib/format";
+import { usePrefs } from "../lib/prefs";
 import type { UsageWindow } from "../types";
 
 interface Props {
@@ -12,6 +9,8 @@ interface Props {
 }
 
 export default function UsageBar({ label, data }: Props) {
+  const { locale, t } = usePrefs();
+
   if (!data) {
     return (
       <div className="flex flex-col gap-1">
@@ -39,7 +38,7 @@ export default function UsageBar({ label, data }: Props) {
           {label}
         </Text>
         <span className={`font-medium tabular-nums ${textColor}`}>
-          {percent}% · 重置 {formatDuration(data.resetInSec)}
+          {percent}% · {t("resetIn", { duration: formatDuration(data.resetInSec, locale) })}
         </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-kumo-recessed">

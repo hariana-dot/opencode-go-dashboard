@@ -3,7 +3,9 @@ import type {
   AccountFormData,
   AccountWithUsage,
   UsageHistoryResult,
+  UsageOverviewResult,
   UsageResult,
+  UsageSyncResult,
 } from "../types";
 
 async function request<T>(
@@ -104,4 +106,26 @@ export async function fetchUsageHistory(
     { method: "GET" }
   );
   return data.history;
+}
+
+export async function syncUsageHistory(
+  id: string,
+  cursor: number = 0
+): Promise<UsageSyncResult> {
+  const data = await request<UsageSyncResult>(
+    `/api/accounts/${id}/sync?cursor=${encodeURIComponent(cursor)}`,
+    { method: "POST" }
+  );
+  return data;
+}
+
+export async function fetchUsageOverview(
+  id: string,
+  year: number,
+  month: number
+): Promise<UsageOverviewResult> {
+  const data = await request<{ id: string; overview: UsageOverviewResult }>(
+    `/api/accounts/${id}/overview?year=${year}&month=${month}`
+  );
+  return data.overview;
 }

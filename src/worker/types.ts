@@ -74,3 +74,27 @@ export interface UsageHistoryResult {
   cursor: number;
   error?: string;
 }
+
+export interface UsageSyncResult {
+  inserted: number;
+  nextCursor: number;
+  done: boolean;
+  lastSyncedAt: string | null;
+  error?: string;
+}
+
+export interface UsageDayModelCost {
+  date: string;
+  model: string;
+  cost: number;
+}
+
+export interface UsageOverviewResult {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  series: UsageDayModelCost[];
+  models: string[];
+  keys: string[];
+  lastSyncedAt: string | null;
+}

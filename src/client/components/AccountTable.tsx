@@ -5,12 +5,16 @@ import {
   PencilSimple,
   Trash,
 } from "@phosphor-icons/react";
+import { localeTag } from "../lib/i18n";
+import { usePrefs } from "../lib/prefs";
 import type { AccountWithUsage } from "../types";
+import CostChart from "./CostChart";
 import UsageBar from "./UsageBar";
 
 interface Props {
   accounts: AccountWithUsage[];
   refreshingIds: Set<string>;
+  chartToken: number;
   onRefresh: (id: string) => void;
   onEdit: (account: AccountWithUsage) => void;
   onDelete: (account: AccountWithUsage) => void;
@@ -20,16 +24,19 @@ interface Props {
 export default function AccountTable({
   accounts,
   refreshingIds,
+  chartToken,
   onRefresh,
   onEdit,
   onDelete,
   onHistory,
 }: Props) {
+  const { locale, t } = usePrefs();
+
   if (accounts.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-kumo-line bg-kumo-elevated p-10 text-center">
         <Text variant="secondary" as="p" DANGEROUS_className="m-0">
-          还没有账号。点击「添加账号」录入 Workspace ID 和 Auth Cookie。
+          {t("emptyAccounts")}
         </Text>
       </div>
     );
@@ -49,7 +56,7 @@ export default function AccountTable({
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <Text variant="heading4" as="h2" DANGEROUS_className="m-0">
+                <Text variant="heading3" as="h2" DANGEROUS_className="m-0">
                   {account.name}
                 </Text>
                 <Text
@@ -71,7 +78,7 @@ export default function AccountTable({
                 ) : null}
               </div>
 
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
@@ -79,7 +86,7 @@ export default function AccountTable({
                   onClick={() => onRefresh(account.id)}
                   disabled={refreshing}
                 >
-                  {refreshing ? "查询中" : "刷新"}
+                  {refreshing ? t("querying") : t("refresh")}
                 </Button>
                 <Button
                   variant="secondary"
@@ -87,7 +94,7 @@ export default function AccountTable({
                   icon={ClockCounterClockwise}
                   onClick={() => onHistory(account)}
                 >
-                  历史
+                  {t("history")}
                 </Button>
                 <Button
                   variant="secondary"
@@ -95,7 +102,7 @@ export default function AccountTable({
                   icon={PencilSimple}
                   onClick={() => onEdit(account)}
                 >
-                  编辑
+                  {t("edit")}
                 </Button>
                 <Button
                   variant="secondary"
@@ -103,7 +110,7 @@ export default function AccountTable({
                   icon={Trash}
                   onClick={() => onDelete(account)}
                 >
-                  删除
+                  {t("delete")}
                 </Button>
               </div>
             </div>
@@ -119,13 +126,13 @@ export default function AccountTable({
                 </Text>
               ) : usage ? (
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <UsageBar label="Rolling" data={usage.rolling} />
-                  <UsageBar label="Weekly" data={usage.weekly} />
-                  <UsageBar label="Monthly" data={usage.monthly} />
+                  <UsageBar label={t("rolling")} data={usage.rolling} />
+                  <UsageBar label={t("weekly")} data={usage.weekly} />
+                  <UsageBar label={t("monthly")} data={usage.monthly} />
                 </div>
               ) : (
                 <Text variant="secondary" as="p" DANGEROUS_className="m-0 text-sm">
-                  尚未查询额度，点击「刷新」或「全部刷新」。
+                  {t("notQueried")}
                 </Text>
               )}
 
@@ -135,9 +142,15 @@ export default function AccountTable({
                   as="p"
                   DANGEROUS_className="m-0 mt-3 text-[11px]"
                 >
-                  更新于 {new Date(usage.fetchedAt).toLocaleString("zh-CN")}
+                  {t("updatedAt", {
+                    time: new Date(usage.fetchedAt).toLocaleString(
+                      localeTag(locale)
+                    ),
+                  })}
                 </Text>
               ) : null}
+
+              <CostChart accountId={account.id} refreshToken={chartToken} />
             </div>
           </article>
         );

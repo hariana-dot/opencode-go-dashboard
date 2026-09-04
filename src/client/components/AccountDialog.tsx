@@ -8,6 +8,7 @@ import {
   Textarea,
 } from "@cloudflare/kumo";
 import { useEffect, useState } from "react";
+import { usePrefs } from "../lib/prefs";
 import type { Account, AccountFormData } from "../types";
 
 interface Props {
@@ -30,6 +31,7 @@ export default function AccountDialog({
   account,
   onSave,
 }: Props) {
+  const { t } = usePrefs();
   const [form, setForm] = useState<AccountFormData>(EMPTY_FORM);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -59,7 +61,7 @@ export default function AccountDialog({
       await onSave(form);
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setLoading(false);
     }
@@ -68,25 +70,25 @@ export default function AccountDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog className="max-w-lg p-6">
-        <Dialog.Title>{isEdit ? "编辑账号" : "添加账号"}</Dialog.Title>
+        <Dialog.Title>{isEdit ? t("editTitle") : t("addTitle")}</Dialog.Title>
         <Dialog.Description className="mt-1">
-          从浏览器开发者工具复制 auth Cookie 和 Workspace ID。Cookie 保存后不会再次显示。
+          {t("dialogHint")}
         </Dialog.Description>
 
         <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="account-name">显示名称</Label>
+            <Label htmlFor="account-name">{t("displayName")}</Label>
             <Input
               id="account-name"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="张三 / 主号 / dev-team-01"
+              placeholder="clcelvis"
               required
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="workspace-id">Workspace ID</Label>
+            <Label htmlFor="workspace-id">{t("workspaceId")}</Label>
             <Input
               id="workspace-id"
               value={form.workspaceId}
@@ -100,7 +102,7 @@ export default function AccountDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="auth-cookie">
-              Auth Cookie{isEdit ? "（留空则保持不变）" : ""}
+              {isEdit ? t("authCookieKeep") : t("authCookie")}
             </Label>
             <SensitiveInput
               id="auth-cookie"
@@ -115,12 +117,11 @@ export default function AccountDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="account-notes">备注（可选）</Label>
+            <Label htmlFor="account-notes">{t("notes")}</Label>
             <Textarea
               id="account-notes"
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="团队、用途、到期提醒等"
               rows={2}
             />
           </div>
@@ -141,10 +142,10 @@ export default function AccountDialog({
               variant="secondary"
               onClick={() => onOpenChange(false)}
             >
-              取消
+              {t("cancel")}
             </Button>
             <Button type="submit" variant="primary" disabled={loading}>
-              {loading ? "保存中…" : "保存"}
+              {loading ? t("saving") : t("save")}
             </Button>
           </div>
         </form>
