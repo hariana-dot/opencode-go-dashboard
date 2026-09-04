@@ -21,7 +21,7 @@
       "binding": "DB",
       "database_name": "opencode-go-dashboard",
       // Run: wrangler d1 create opencode-go-dashboard
-      "database_id": "0704d204-22a4-473d-969d-85640dcc21cc"
+      "database_id": "c69a7376-1343-45c1-9817-61b159187d02"
     }
   ],
   "observability": {

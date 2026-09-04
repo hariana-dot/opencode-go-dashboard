@@ -10,7 +10,7 @@
     "build": "npm run build:client",
     "dev": "vite",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && wrangler d1 migrations apply opencode-go-dashboard --remote && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply opencode-go-dashboard --local",
     "db:migrate:remote": "wrangler d1 migrations apply opencode-go-dashboard --remote"
   },
