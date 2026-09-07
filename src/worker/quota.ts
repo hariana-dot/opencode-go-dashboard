@@ -8,9 +8,9 @@ import type {
 const WORKSPACE_RE = /^wrk_[a-zA-Z0-9]+$/;
 
 const USAGE_PATTERNS = {
-  rolling: /rollingUsage:\$R\[\d+\]=(\{[^}]+\})/,
-  weekly: /weeklyUsage:\$R\[\d+\]=(\{[^}]+\})/,
-  monthly: /monthlyUsage:\$R\[\d+\]=(\{[^}]+\})/,
+  rolling: /rollingUsage:\$R\[\d+\]=(\{[^}]+\})/g,
+  weekly: /weeklyUsage:\$R\[\d+\]=(\{[^}]+\})/g,
+  monthly: /monthlyUsage:\$R\[\d+\]=(\{[^}]+\})/g,
 } as const;
 
 const PLAN_PATTERN = /plan:\$R\[\d+\]="([^"]+)"/;
@@ -65,12 +65,15 @@ export async function fetchGoQuota(
   const cookieError = validateAuthCookie(authCookie);
   if (cookieError) throw new Error(cookieError);
 
-  const url = `https://opencode.ai/workspace/${encodeURIComponent(workspaceId)}/go`;
+  const url = `https://opencode.ai/workspace/${encodeURIComponent(
+    workspaceId
+  )}/go?_ogc=${Date.now()}`;
   const response = await fetch(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Cache-Control": "no-cache",
       Cookie: `auth=${authCookie.trim()}`,
     },
     redirect: "follow",
@@ -102,9 +105,12 @@ export async function fetchGoQuota(
   };
 
   for (const key of ["rolling", "weekly", "monthly"] as const) {
-    const match = html.match(USAGE_PATTERNS[key]);
-    if (match) {
-      usage[key] = parseUsageObject(match[1]);
+    let last: RegExpMatchArray | null = null;
+    for (const match of html.matchAll(USAGE_PATTERNS[key])) {
+      last = match;
+    }
+    if (last) {
+      usage[key] = parseUsageObject(last[1]);
     }
   }
 

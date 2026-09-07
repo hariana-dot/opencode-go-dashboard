@@ -124,16 +124,12 @@ export async function fetchUsageHistory(
 
 export async function syncUsageHistory(
   id: string,
-  cursor: number = 0,
-  until?: string
+  until: string
 ): Promise<UsageSyncResult> {
-  const params = new URLSearchParams({ cursor: String(cursor) });
-  if (until) params.set("until", until);
-  const data = await request<UsageSyncResult>(
-    `/api/accounts/${id}/sync?${params}`,
-    { method: "POST", timeoutMs: 25000 }
+  return await request<UsageSyncResult>(
+    `/api/accounts/${id}/sync?until=${encodeURIComponent(until)}`,
+    { method: "POST", timeoutMs: 30000 }
   );
-  return data;
 }
 
 export async function fetchUsageOverview(

@@ -77,9 +77,7 @@ export interface UsageHistoryResult {
 
 export interface UsageSyncResult {
   inserted: number;
-  nextCursor: number;
   done: boolean;
-  oldest: string | null;
   lastSyncedAt: string | null;
   error?: string;
 }
@@ -114,37 +112,21 @@ export interface ModelUsageDayRow {
   usage: number;
 }
 
-export interface EstimateModelDailyPoint {
-  date: string;
-  costUsd: number;
-}
-
-export interface EstimateModelRow {
+export interface EstimateHypoModel {
   model: string;
-  usage: number | null;
-  burnedFraction: number;
-  requests: number;
-  daily: EstimateModelDailyPoint[];
-}
-
-export interface DailyBurnPoint {
-  date: string;
-  fraction: number;
+  usage: number;
+  hypUsedPct: number;
+  rateFracPerDay: number;
 }
 
 export interface EstimateResult {
   windowStart: string;
   windowLengthMs: number;
-  estUsedPct: number | null;
-  estRemainingPct: number | null;
+  recordCount: number;
   officialMonthlyPct: number | null;
   officialResetInSec: number | null;
-  dailyBurn: DailyBurnPoint[];
-  models: EstimateModelRow[];
-  unmappedModels: { model: string; requests: number }[];
-  unmappedRequests: number;
-  approxRequests: number;
-  priceFetchedAt: string | null;
+  models: EstimateHypoModel[];
+  ref: EstimateHypoModel | null;
 }
 
 export interface PricingPayload {

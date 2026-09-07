@@ -65,17 +65,15 @@ export default function CostChart({ accountId, refreshToken }: Props) {
     setError("");
     const until = `${year}-${padMonth(month)}-01T00:00:00.000Z`;
     try {
-      let cursor = 0;
-      for (let i = 0; i < 6; i++) {
-        const result = await syncUsageHistory(accountId, cursor, until);
+      for (let i = 0; i < 25; i++) {
+        const result = await syncUsageHistory(accountId, until);
         if (result.error) {
           setError(result.error);
           break;
         }
-        cursor = result.nextCursor;
-        await load();
         if (result.done) break;
       }
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("syncFailed"));
     } finally {

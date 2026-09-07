@@ -163,41 +163,6 @@ export async function upsertUsageRecords(
   return items.length;
 }
 
-export async function saveUsageSync(
-  db: D1Database,
-  accountId: string,
-  cursor: number
-): Promise<string> {
-  const now = new Date().toISOString();
-  await db
-    .prepare(
-      `INSERT INTO usage_sync (account_id, last_synced_at, last_cursor)
-       VALUES (?, ?, ?)
-       ON CONFLICT(account_id) DO UPDATE SET
-         last_synced_at = excluded.last_synced_at,
-         last_cursor = excluded.last_cursor`
-    )
-    .bind(accountId, now, cursor)
-    .run();
-  return now;
-}
-
-export async function getUsageSync(
-  db: D1Database,
-  accountId: string
-): Promise<{ lastSyncedAt: string | null; lastCursor: number }> {
-  const row = await db
-    .prepare(
-      "SELECT last_synced_at, last_cursor FROM usage_sync WHERE account_id = ?"
-    )
-    .bind(accountId)
-    .first<{ last_synced_at: string | null; last_cursor: number }>();
-  return {
-    lastSyncedAt: row?.last_synced_at ?? null,
-    lastCursor: row?.last_cursor ?? 0,
-  };
-}
-
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -321,4 +286,68 @@ export async function listUsedModelSuffixes(db: D1Database): Promise<string[]> {
     .prepare("SELECT DISTINCT model FROM usage_records")
     .all<{ model: string }>();
   return (results ?? []).map((r) => suffixOf(r.model));
+}
+
+export interface UsageSyncState {
+  lastSyncedAt: string | null;
+  lastCursor: number;
+  oldestSyncedAt: string | null;
+  lastRecordAt: string | null;
+}
+
+export async function getUsageSync(
+  db: D1Database,
+  accountId: string
+): Promise<UsageSyncState> {
+  const row = await db
+    .prepare(
+      "SELECT last_synced_at, last_cursor, oldest_synced_at, last_record_at FROM usage_sync WHERE account_id = ?"
+    )
+    .first<{
+      last_synced_at: string | null;
+      last_cursor: number;
+      oldest_synced_at: string | null;
+      last_record_at: string | null;
+    }>();
+  return {
+    lastSyncedAt: row?.last_synced_at ?? null,
+    lastCursor: row?.last_cursor ?? 0,
+    oldestSyncedAt: row?.oldest_synced_at ?? null,
+    lastRecordAt: row?.last_record_at ?? null,
+  };
+}
+
+export async function saveUsageSync(
+  db: D1Database,
+  accountId: string,
+  data: {
+    cursor: number;
+    oldestSyncedAt: string | null;
+    lastRecordAt: string | null;
+  }
+): Promise<string> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO usage_sync (account_id, last_synced_at, last_cursor, oldest_synced_at, last_record_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET
+         last_synced_at = excluded.last_synced_at,
+         last_cursor = excluded.last_cursor,
+         oldest_synced_at = COALESCE(
+           MIN(usage_sync.oldest_synced_at, excluded.oldest_synced_at),
+           usage_sync.oldest_synced_at,
+           excluded.oldest_synced_at
+         ),
+         last_record_at = excluded.last_record_at`
+    )
+    .bind(
+      accountId,
+      now,
+      data.cursor,
+      data.oldestSyncedAt,
+      data.lastRecordAt
+    )
+    .run();
+  return now;
 }

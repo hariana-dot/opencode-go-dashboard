@@ -11,7 +11,7 @@ import {
   getLatestPriceSnapshot,
   getUsageOverview,
   listAccounts,
-  listModelUsageDays,
+  getUsageSync,
   saveUsageSync,
   suffixOf,
   updateAccount,
@@ -27,17 +27,20 @@ import {
 import type {
   AccountWithUsage,
   CreateAccountBody,
+  EstimateHypoModel,
   EstimateResult,
+  PricingModelRow,
   PricingPayload,
   UpdateAccountBody,
   UsageHistoryItem,
   UsageResult,
 } from "./types";
 
-const SYNC_PAGES_PER_REQUEST = 2;
+const SYNC_PAGES_PER_REQUEST = 10;
 const HISTORY_PAGE_FULL = 40;
 const ESTIMATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-const COST_SCALE = 1_000_000_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const GLM_FLASH_RE = /^glm-\d+(?:\.\d+)*-flash$/;
 const EXTRA_FREE_SUFFIXES = ["big-pickle"];
 
 export interface Env {
@@ -352,24 +355,25 @@ async function handleSyncHistory(
   id: string
 ): Promise<Response> {
   const url = new URL(request.url);
-  const cursorParam = Number(url.searchParams.get("cursor") ?? "0");
-  let cursor =
-    Number.isFinite(cursorParam) && cursorParam >= 0 ? cursorParam : 0;
+  const untilParam = url.searchParams.get("until");
+  const until =
+    untilParam ?? new Date(Date.now() - ESTIMATE_WINDOW_MS).toISOString();
 
-  const until = url.searchParams.get("until");
   const row = await getAccountRow(env.DB, id);
   if (!row) return json({ error: "账号不存在" }, 404);
 
+  const sync = await getUsageSync(env.DB, id);
+
   let inserted = 0;
   let done = false;
-  let oldest: string | null = null;
-  let lastSyncedAt: string | null = null;
+  let oldestSeen: string | null = sync.oldestSyncedAt;
+  let lastRecordAt = sync.lastRecordAt;
   try {
     for (let i = 0; i < SYNC_PAGES_PER_REQUEST; i++) {
       const history = await fetchGoUsageHistory(
         row.workspace_id,
         row.auth_cookie,
-        cursor,
+        0,
         true
       );
       if (history.items.length === 0) {
@@ -377,35 +381,53 @@ async function handleSyncHistory(
         break;
       }
       inserted += await upsertUsageRecords(env.DB, id, history.items);
+      let pageOldest: string | null = null;
       for (const item of history.items) {
-        if (!oldest || item.timeCreated < oldest) oldest = item.timeCreated;
+        if (!pageOldest || item.timeCreated < pageOldest) {
+          pageOldest = item.timeCreated;
+        }
       }
-      cursor += 1;
-      lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
+      if (pageOldest && (!oldestSeen || pageOldest < oldestSeen)) {
+        oldestSeen = pageOldest;
+      }
+
+      if (pageOldest && pageOldest <= until) {
+        done = true;
+        break;
+      }
+      if (
+        pageOldest &&
+        lastRecordAt &&
+        pageOldest <= lastRecordAt &&
+        oldestSeen &&
+        oldestSeen <= until
+      ) {
+        done = true;
+        break;
+      }
       if (history.items.length < HISTORY_PAGE_FULL) {
         done = true;
         break;
       }
-      if (until && oldest && oldest < until) {
-        done = true;
-        break;
-      }
     }
-    if (!lastSyncedAt) lastSyncedAt = await saveUsageSync(env.DB, id, cursor);
-    return json({
-      inserted,
-      nextCursor: cursor,
-      done,
-      oldest,
-      lastSyncedAt,
+    const maxRow = await env.DB
+      .prepare(
+        "SELECT MAX(time_created) AS m FROM usage_records WHERE account_id = ?"
+      )
+      .bind(id)
+      .first<{ m: string | null }>();
+    lastRecordAt = maxRow?.m ?? lastRecordAt;
+    const lastSyncedAt = await saveUsageSync(env.DB, id, {
+      cursor: 0,
+      oldestSyncedAt: oldestSeen,
+      lastRecordAt,
     });
+    return json({ inserted, done, lastSyncedAt });
   } catch (err) {
     return json({
       inserted,
-      nextCursor: cursor,
       done: false,
-      oldest,
-      lastSyncedAt,
+      lastSyncedAt: null,
       error: err instanceof Error ? err.message : "同步失败",
     });
   }
@@ -494,6 +516,92 @@ async function handlePricesRefresh(env: Env): Promise<Response> {
   }
 }
 
+interface PricedModel {
+  suffix: string;
+  usage: number;
+  peakRow: PricingModelRow | null;
+  offRow: PricingModelRow | null;
+  baseRow: PricingModelRow | null;
+  upRow: PricingModelRow | null;
+  threshold: number;
+  peakRanges: [number, number][];
+}
+
+function buildPricedModel(
+  suffix: string,
+  rows: PricingModelRow[],
+  peakHours: Record<string, [number, number][]> | null
+): PricedModel | null {
+  if (rows.length === 0) return null;
+  const usage = Math.max(...rows.map((r) => r.usage ?? 0));
+  if (!(usage > 0)) return null;
+  const peakRows = rows.filter((r) => r.tier === "Peak");
+  const offRows = rows.filter((r) => r.tier === "Off-Peak");
+  const upRows = rows.filter((r) => (r.tier ?? "").startsWith(">"));
+  const baseRows = rows.filter(
+    (r) =>
+      r.tier !== "Peak" && r.tier !== "Off-Peak" && !(r.tier ?? "").startsWith(">")
+  );
+  let threshold = Infinity;
+  if (upRows.length > 0 && baseRows.length > 0) {
+    const match = (upRows[0].tier ?? "").match(/([\d.]+)\s*K/i);
+    threshold = match ? parseFloat(match[1]) * 1000 : Infinity;
+  }
+  const key = suffix.replace(/[^a-z0-9]/g, "");
+  const peakRanges = peakHours?.[key] ?? [];
+  return {
+    suffix,
+    usage,
+    peakRow: peakRows[0] ?? null,
+    offRow: offRows[0] ?? null,
+    baseRow: baseRows[0] ?? rows[0],
+    upRow: upRows[0] ?? null,
+    threshold,
+    peakRanges,
+  };
+}
+
+function pickRow(
+  pm: PricedModel,
+  hourUtc: number,
+  ctxTokens: number
+): PricingModelRow | null {
+  if (pm.peakRow && pm.offRow) {
+    const inPeak = pm.peakRanges.some(([from, to]) => hourUtc >= from && hourUtc < to);
+    return inPeak ? pm.peakRow : pm.offRow;
+  }
+  if (pm.upRow && ctxTokens > pm.threshold) return pm.upRow;
+  return pm.baseRow;
+}
+
+function hypCostUsd(
+  row: PricingModelRow,
+  rec: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_5m_tokens: number | null;
+    cache_write_1h_tokens: number | null;
+  }
+): number {
+  const input = row.input ?? 0;
+  const output = row.output ?? 0;
+  const cachedRead = row.cachedRead ?? 0;
+  const cachedWrite = row.cachedWrite ?? row.input ?? 0;
+  return (
+    (rec.input_tokens * input +
+      rec.output_tokens * output +
+      rec.cache_read_tokens * cachedRead +
+      ((rec.cache_write_5m_tokens ?? 0) + (rec.cache_write_1h_tokens ?? 0)) *
+        cachedWrite) /
+    1e6
+  );
+}
+
+function glmVersionParts(suffix: string): number[] {
+  return (suffix.match(/\d+/g) ?? []).map(Number);
+}
+
 async function handleEstimate(env: Env, id: string): Promise<Response> {
   const row = await getAccountRow(env.DB, id);
   if (!row) return json({ error: "账号不存在" }, 404);
@@ -512,144 +620,152 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       ? nowMs + monthly.resetInSec * 1000 - ESTIMATE_WINDOW_MS
       : nowMs - ESTIMATE_WINDOW_MS;
   const windowStart = new Date(windowStartMs).toISOString();
+  const daysRemaining = Math.max(
+    0,
+    (windowStartMs + ESTIMATE_WINDOW_MS - nowMs) / DAY_MS
+  );
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
 
   const snap = await getLatestPriceSnapshot(env.DB);
   const payload = parsePayload(snap?.payload ?? null);
+
   const free = new Set<string>(EXTRA_FREE_SUFFIXES);
   for (const item of payload?.freeModels ?? []) {
     const suffix = suffixOf(String(item?.id ?? ""));
     if (suffix) free.add(suffix);
   }
 
-  const usageDays = await listModelUsageDays(env.DB);
-  const usageByModel = new Map<string, { date: string; usage: number }[]>();
-  for (const day of usageDays) {
-    const list = usageByModel.get(day.model_suffix) ?? [];
-    list.push({ date: day.snapshot_date, usage: day.usage });
-    usageByModel.set(day.model_suffix, list);
-  }
-  for (const list of usageByModel.values()) {
-    list.sort((a, b) => a.date.localeCompare(b.date));
+  const pricedRows = new Map<string, PricingModelRow[]>();
+  for (const model of payload?.models ?? []) {
+    const suffix = suffixOf(String(model.id ?? ""));
+    if (!suffix) continue;
+    const list = pricedRows.get(suffix) ?? [];
+    list.push(model);
+    pricedRows.set(suffix, list);
   }
 
-  function usageAt(
-    suffix: string,
-    day: string
-  ): { usage: number; approx: boolean } | null {
-    const list = usageByModel.get(suffix);
-    if (!list || list.length === 0) return null;
-    let found: { date: string; usage: number } | null = null;
-    for (const item of list) {
-      if (item.date <= day) found = item;
-      else break;
-    }
-    let approx = false;
-    if (!found) {
-      found = list[0];
-      approx = true;
-    }
-    return { usage: found.usage, approx };
+  let refSuffix = "";
+  const glmCandidates = [...pricedRows.keys()].filter((s) =>
+    GLM_FLASH_RE.test(s)
+  );
+  if (glmCandidates.length > 0) {
+    glmCandidates.sort((a, b) => {
+      const pa = glmVersionParts(a);
+      const pb = glmVersionParts(b);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
+    refSuffix = glmCandidates[glmCandidates.length - 1];
   }
 
   const { results } = await env.DB.prepare(
-    `SELECT model, substr(time_created, 1, 10) AS day, SUM(cost) AS cost, COUNT(*) AS n
+    `SELECT time_created, model, input_tokens, output_tokens, cache_read_tokens,
+            cache_write_5m_tokens, cache_write_1h_tokens
      FROM usage_records
      WHERE account_id = ? AND time_created >= ?
-     GROUP BY model, day`
+     ORDER BY time_created DESC`
   )
     .bind(id, windowStart)
-    .all<{ model: string; day: string; cost: number; n: number }>();
+    .all<{
+      time_created: string;
+      model: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_5m_tokens: number | null;
+      cache_write_1h_tokens: number | null;
+    }>();
+  const records = results ?? [];
 
-  interface Acc {
-    requests: number;
-    burned: number;
-    approx: number;
-    usage: number | null;
-    daily: Map<string, number>;
-  }
-  const acc = new Map<string, Acc>();
-  const unmapped = new Map<string, number>();
-  const dailyBurnMap = new Map<string, number>();
-  let approxRequests = 0;
-  let unmappedRequests = 0;
-  let totalBurned = 0;
-
-  for (const group of results ?? []) {
-    const suffix = suffixOf(group.model);
-    const requests = Number(group.n);
-    const costUsd = Number(group.cost) / COST_SCALE;
+  const usedSuffixes = new Set<string>();
+  for (const rec of records) {
+    const suffix = suffixOf(rec.model);
     if (free.has(suffix)) continue;
-    const rate = usageAt(suffix, group.day);
-    if (!rate) {
-      unmapped.set(group.model, (unmapped.get(group.model) ?? 0) + requests);
-      unmappedRequests += requests;
-      continue;
+    if (!pricedRows.has(suffix)) continue;
+    usedSuffixes.add(suffix);
+  }
+
+  const targets = new Set<string>(usedSuffixes);
+  if (refSuffix) targets.add(refSuffix);
+
+  const priced = new Map<string, PricedModel>();
+  for (const suffix of targets) {
+    const pm = buildPricedModel(
+      suffix,
+      pricedRows.get(suffix) ?? [],
+      payload?.peakHours ?? null
+    );
+    if (pm) priced.set(suffix, pm);
+  }
+
+  const hyp = new Map<string, Map<string, number>>();
+  for (const rec of records) {
+    const day = rec.time_created.slice(0, 10);
+    const hour = Number(rec.time_created.slice(11, 13)) || 0;
+    const ctx =
+      rec.input_tokens +
+      rec.cache_read_tokens +
+      (rec.cache_write_5m_tokens ?? 0) +
+      (rec.cache_write_1h_tokens ?? 0);
+    for (const [suffix, pm] of priced) {
+      const priceRow = pickRow(pm, hour, ctx);
+      if (!priceRow) continue;
+      const cost = hypCostUsd(priceRow, rec);
+      const days = hyp.get(suffix) ?? new Map<string, number>();
+      days.set(day, (days.get(day) ?? 0) + cost);
+      hyp.set(suffix, days);
     }
-    const entry =
-      acc.get(suffix) ??
-      ({
-        requests: 0,
-        burned: 0,
-        approx: 0,
-        usage: rate.usage,
-        daily: new Map<string, number>(),
-      } as Acc);
-    entry.requests += requests;
-    entry.burned += costUsd / rate.usage;
-    if (rate.approx) {
-      entry.approx += requests;
-      approxRequests += requests;
-    }
-    acc.set(suffix, entry);
-    entry.daily.set(group.day, (entry.daily.get(group.day) ?? 0) + costUsd);
-    dailyBurnMap.set(
-      group.day,
-      (dailyBurnMap.get(group.day) ?? 0) + costUsd / rate.usage
+  }
+
+  const last7Days: string[] = [];
+  for (let i = 1; i <= 7; i++) {
+    last7Days.push(
+      new Date(todayUtc.getTime() - i * DAY_MS).toISOString().slice(0, 10)
     );
   }
 
-  for (const entry of acc.values()) {
-    totalBurned += entry.burned;
+  function hypoFor(suffix: string): EstimateHypoModel | null {
+    const pm = priced.get(suffix);
+    if (!pm) return null;
+    const days = hyp.get(suffix);
+    let total = 0;
+    if (days) {
+      for (const value of days.values()) total += value;
+    }
+    let sum7 = 0;
+    for (const day of last7Days) sum7 += days?.get(day) ?? 0;
+    const rate7 = sum7 / 7;
+    return {
+      model: suffix,
+      usage: pm.usage,
+      hypUsedPct: Math.round((total / pm.usage) * 1000) / 10,
+      rateFracPerDay: Math.round((rate7 / pm.usage) * 1e8) / 1e8,
+    };
   }
 
-  const models = [...acc.entries()]
-    .map(([model, entry]) => ({
-      model,
-      usage: entry.usage,
-      burnedFraction: entry.burned,
-      requests: entry.requests,
-      daily: [...entry.daily.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, costUsd]) => ({
-          date,
-          costUsd: Math.round(costUsd * 1e6) / 1e6,
-        })),
-    }))
-    .sort((a, b) => b.burnedFraction - a.burnedFraction);
+  const models: EstimateHypoModel[] = [];
+  for (const suffix of usedSuffixes) {
+    const hypo = hypoFor(suffix);
+    if (hypo) models.push(hypo);
+  }
+  const projectedOf = (h: EstimateHypoModel) =>
+    h.hypUsedPct + h.rateFracPerDay * 100 * daysRemaining;
+  models.sort((a, b) => projectedOf(b) - projectedOf(a));
+
+  const ref = refSuffix ? hypoFor(refSuffix) : null;
 
   const estimate: EstimateResult = {
     windowStart,
     windowLengthMs: ESTIMATE_WINDOW_MS,
-    estUsedPct: snap ? Math.round(totalBurned * 1000) / 10 : null,
-    estRemainingPct: snap
-      ? Math.round(Math.max(0, 1 - totalBurned) * 1000) / 10
-      : null,
+    recordCount: records.length,
     officialMonthlyPct: monthly?.usagePercent ?? null,
     officialResetInSec: monthly?.resetInSec ?? null,
-    dailyBurn: [...dailyBurnMap.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, fraction]) => ({
-        date,
-        fraction: Math.round(fraction * 1e6) / 1e6,
-      })),
     models,
-    unmappedModels: [...unmapped.entries()].map(([model, requests]) => ({
-      model,
-      requests,
-    })),
-    unmappedRequests,
-    approxRequests,
-    priceFetchedAt: snap?.fetched_at ?? null,
+    ref,
   };
   return json({ id, estimate });
 }
