@@ -565,6 +565,7 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     burned: number;
     approx: number;
     usage: number | null;
+    daily: Map<string, number>;
   }
   const acc = new Map<string, Acc>();
   const unmapped = new Map<string, number>();
@@ -586,7 +587,13 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     }
     const entry =
       acc.get(suffix) ??
-      ({ requests: 0, burned: 0, approx: 0, usage: rate.usage } as Acc);
+      ({
+        requests: 0,
+        burned: 0,
+        approx: 0,
+        usage: rate.usage,
+        daily: new Map<string, number>(),
+      } as Acc);
     entry.requests += requests;
     entry.burned += costUsd / rate.usage;
     if (rate.approx) {
@@ -594,6 +601,7 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       approxRequests += requests;
     }
     acc.set(suffix, entry);
+    entry.daily.set(group.day, (entry.daily.get(group.day) ?? 0) + costUsd);
     dailyBurnMap.set(
       group.day,
       (dailyBurnMap.get(group.day) ?? 0) + costUsd / rate.usage
@@ -610,6 +618,12 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       usage: entry.usage,
       burnedFraction: entry.burned,
       requests: entry.requests,
+      daily: [...entry.daily.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, costUsd]) => ({
+          date,
+          costUsd: Math.round(costUsd * 1e6) / 1e6,
+        })),
     }))
     .sort((a, b) => b.burnedFraction - a.burnedFraction);
 

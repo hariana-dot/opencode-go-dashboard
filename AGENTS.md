@@ -27,4 +27,6 @@ opencode-go-dashboard/
 ## Notes
 
 - Do not commit `.dev.vars` or auth cookies.
-- After schema changes: `npm run db:migrate:remote` then `npm run deploy`.
+- After schema changes: `npm run db:migrate:remote` then `npm run deploy` (deploy script runs remote migrations first).
+- Price snapshots: Worker cron `0 0 * * *` fetches `ocgo-pricing.all-the.rest/data/latest.json` into D1 (`price_snapshots` + `model_usage_days`); dashboard on-load refreshes when stale >12 h. First run backfills from the site's `data/history.json`.
+- Monthly estimate burn = Σ(official per-request cost ÷ model usage allowance on that request's date); `big-pickle` and snapshot free models burn 0; unmatched models excluded and flagged. UI: one marker bar per used model (fill = that model's pool share, solid tick = current pool %, dotted tick = pool projection at reset if only that model continues at 7-day pace) plus a version-agnostic "GLM Flash (latest)" reference row (latest `glm-*-flash` from the price snapshot; scenario = last-7-day total spend on that model).

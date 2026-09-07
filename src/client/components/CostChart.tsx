@@ -2,20 +2,10 @@ import { Loader, Text } from "@cloudflare/kumo";
 import { CaretLeft, CaretRight } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchUsageOverview, syncUsageHistory } from "../lib/api";
+import { paletteColor, PALETTE } from "../lib/colors";
 import { localeTag } from "../lib/i18n";
 import { usePrefs } from "../lib/prefs";
 import { COST_SCALE, type UsageOverviewResult } from "../types";
-
-const PALETTE = [
-  "#c4b454",
-  "#3d8a8a",
-  "#7c6a9a",
-  "#c47a54",
-  "#5a8f5a",
-  "#8a5a7a",
-  "#5a7aa8",
-  "#a88a4a",
-];
 
 interface Props {
   accountId: string;

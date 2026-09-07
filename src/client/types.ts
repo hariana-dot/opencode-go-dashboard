@@ -108,11 +108,17 @@ export interface PriceSnapshotData {
   freeModels: { id: string }[] | null;
 }
 
+export interface EstimateModelDailyPoint {
+  date: string;
+  costUsd: number;
+}
+
 export interface EstimateModelRow {
   model: string;
   usage: number | null;
   burnedFraction: number;
   requests: number;
+  daily: EstimateModelDailyPoint[];
 }
 
 export interface DailyBurnPoint {

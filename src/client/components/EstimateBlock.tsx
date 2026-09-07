@@ -1,68 +1,38 @@
 import { Loader, Text } from "@cloudflare/kumo";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEstimate, getPriceSnapshot } from "../lib/api";
+import { paletteColor } from "../lib/colors";
 import { localeTag } from "../lib/i18n";
-import { usageBarColor, usageTextColor } from "../lib/format";
 import { usePrefs } from "../lib/prefs";
 import type {
+  EstimateModelDailyPoint,
   EstimateResult,
   PriceModel,
   PriceSnapshotData,
 } from "../types";
+
+const DAY_MS = 86_400_000;
+const GLM_FLASH_RE = /^glm-\d+(?:\.\d+)*-flash$/;
 
 interface Props {
   accountId: string;
   refreshToken: number;
 }
 
+interface BarRowSpec {
+  key: string;
+  label: string;
+  isRef: boolean;
+  fillPct: number;
+  rateFracPerDay: number;
+  projectedPct: number;
+}
+
 function suffixOf(id: string): string {
   const i = id.lastIndexOf("/");
   return (i >= 0 ? id.slice(i + 1) : id).toLowerCase();
 }
-
-function costPerReq(model: PriceModel): number {
-  const pattern = model.pattern;
-  if (!pattern) return 0;
-  const cw = model.cachedWrite ?? model.input ?? 0;
-  const input = model.input ?? 0;
-  const read = model.cachedRead ?? 0;
-  const output = model.output ?? 0;
-  return (
-    ((0.05 * input + 0.95 * cw) * pattern.input +
-      read * pattern.cachedRead +
-      output * pattern.output) /
-    1e6
-  );
-}
-
-function patternTokens(model: PriceModel): number {
-  const p = model.pattern;
-  if (!p) return 0;
-  return p.input + p.cachedRead + p.output;
-}
-
-function isPeakNow(snapshot: PriceSnapshotData, suffix: string): boolean {
-  const key = suffix.replace(/[^a-z0-9]/g, "");
-  const ranges = snapshot.peakHours?.[key];
-  if (!ranges) return false;
-  const hour = new Date().getUTCHours();
-  return ranges.some(([from, to]) => hour >= from && hour < to);
-}
-
-function fmtReq(n: number): string {
-  if (!Number.isFinite(n)) return "∞";
-  return Math.round(n).toLocaleString("en-US");
-}
-
-function fmtTok(n: number): string {
-  if (!Number.isFinite(n)) return "∞";
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return String(Math.round(n));
-}
-
-const DAY_MS = 86_400_000;
 
 function paceColor(pct: number): string {
   if (pct > 130) return "text-kumo-danger";
@@ -74,11 +44,87 @@ function fmt1(n: number): string {
   return String(Math.round(n * 10) / 10);
 }
 
+function glmVersionParts(suffix: string): number[] {
+  return (suffix.match(/\d+/g) ?? []).map(Number);
+}
+
+function dailyCostAvg(
+  daily: EstimateModelDailyPoint[],
+  lookbackDays: number
+): number {
+  if (!daily || daily.length === 0) return 0;
+  const byDate = new Map(daily.map((point) => [point.date, point.costUsd]));
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  let sum = 0;
+  for (let i = 1; i <= lookbackDays; i++) {
+    const day = new Date(todayUtc.getTime() - i * DAY_MS)
+      .toISOString()
+      .slice(0, 10);
+    sum += byDate.get(day) ?? 0;
+  }
+  return sum / lookbackDays;
+}
+
+function BarRow(props: {
+  label: string;
+  mutedLabel?: boolean;
+  fillPct: number;
+  fillColor: string;
+  solidPct: number | null;
+  dottedPct: number | null;
+  dottedClassName: string;
+  right: ReactNode;
+}) {
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span
+          className={`min-w-0 truncate ${props.mutedLabel ? "italic text-kumo-subtle" : "text-kumo-default"}`}
+        >
+          {props.label}
+        </span>
+        <span className="shrink-0 tabular-nums">{props.right}</span>
+      </div>
+      <div className="relative mt-1 h-2.5">
+        <div className="absolute inset-0 overflow-hidden rounded-full bg-kumo-recessed">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${Math.min(100, Math.max(props.fillPct, props.fillPct > 0 ? 2 : 0))}%`,
+              background: props.fillColor,
+            }}
+          />
+        </div>
+        {props.solidPct != null ? (
+          <span
+            className="absolute bottom-[-3px] top-[-3px] w-[2px] text-kumo-default"
+            style={{
+              left: `${Math.min(100, Math.max(0, props.solidPct))}%`,
+              background: "currentColor",
+              transform: "translateX(-50%)",
+            }}
+          />
+        ) : null}
+        {props.dottedPct != null ? (
+          <span
+            className={`absolute bottom-[-3px] top-[-3px] ${props.dottedClassName}`}
+            style={{
+              left: `${Math.min(100, Math.max(0, props.dottedPct))}%`,
+              borderLeft: "2px dashed currentColor",
+              transform: "translateX(-50%)",
+            }}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
   const { locale, t } = usePrefs();
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
   const [snapshot, setSnapshot] = useState<PriceSnapshotData | null>(null);
-  const [selected, setSelected] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -92,46 +138,16 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       ]);
       setEstimate(est);
       setSnapshot(price);
-      if (!selected && est.models.length > 0) {
-        setSelected(est.models[0].model);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("queryFailed"));
     } finally {
       setLoading(false);
     }
-  }, [accountId, selected, t]);
+  }, [accountId, t]);
 
   useEffect(() => {
     void load();
   }, [load, refreshToken]);
-
-  const selectedRow = useMemo(
-    () => estimate?.models.find((m) => m.model === selected) ?? null,
-    [estimate, selected]
-  );
-
-  const projection = useMemo(() => {
-    if (!snapshot || !selected) return null;
-    const rows = snapshot.models.filter((m) => suffixOf(m.id) === selected);
-    if (rows.length === 0) return null;
-    const usage = rows[0].usage;
-    const remainingFrac = (estimate?.estRemainingPct ?? 0) / 100;
-    const remainingUsd = remainingFrac * usage;
-    const peakRow = rows.find((r) => r.tier === "Peak");
-    const offRow = rows.find((r => r.tier === "Off-Peak"));
-    const baseRow =
-      rows.find((r) => r.tier !== "Peak" && r.tier !== "Off-Peak") ?? rows[0];
-    const peakNow = isPeakNow(snapshot, selected);
-    return { rows, usage, remainingUsd, peakRow, offRow, baseRow, peakNow };
-  }, [snapshot, selected, estimate]);
-
-  const usedPct = estimate?.estUsedPct ?? null;
-  const barPct = usedPct != null ? Math.min(100, Math.max(0, usedPct)) : 0;
-  const delta =
-    usedPct != null && estimate?.officialMonthlyPct != null
-      ? Math.round((usedPct - estimate.officialMonthlyPct) * 10) / 10
-      : null;
 
   const nowMs = Date.now();
   const windowStartMs = estimate ? Date.parse(estimate.windowStart) : NaN;
@@ -149,7 +165,14 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       ? Math.max(0, (windowStartMs + estimate.windowLengthMs - nowMs) / DAY_MS)
       : 0;
 
-  function dailyRate(lookbackDays: number): number {
+  const usedPct = estimate?.estUsedPct ?? null;
+  const barPct = usedPct != null ? Math.min(100, Math.max(0, usedPct)) : 0;
+  const delta =
+    usedPct != null && estimate?.officialMonthlyPct != null
+      ? Math.round((usedPct - estimate.officialMonthlyPct) * 10) / 10
+      : null;
+
+  const overallRate = useMemo(() => {
     if (!estimate) return 0;
     const byDate = new Map(
       estimate.dailyBurn.map((point) => [point.date, point.fraction])
@@ -157,51 +180,102 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     const todayUtc = new Date();
     todayUtc.setUTCHours(0, 0, 0, 0);
     let sum = 0;
-    for (let i = 1; i <= lookbackDays; i++) {
+    for (let i = 1; i <= 7; i++) {
       const day = new Date(todayUtc.getTime() - i * DAY_MS)
         .toISOString()
         .slice(0, 10);
       sum += byDate.get(day) ?? 0;
     }
-    return sum / lookbackDays;
-  }
+    return sum / 7;
+  }, [estimate]);
 
-  function lookbackLine(label: string, lookbackDays: number) {
-    if (estimate?.estUsedPct == null) return null;
-    const rate = dailyRate(lookbackDays);
-    const labelSpan = <span className="text-kumo-subtle">{label}: </span>;
-    if (rate <= 0) {
-      return (
-        <p key={label} className="m-0 mt-0.5 text-[11px]">
-          {labelSpan}
-          <span className="text-kumo-subtle">{t("estNoExhaust")}</span>
-        </p>
-      );
+  const overallProjected =
+    usedPct != null && overallRate > 0
+      ? usedPct + overallRate * 100 * daysRemaining
+      : null;
+
+  const refModel = useMemo<PriceModel | null>(() => {
+    if (!snapshot) return null;
+    const candidates = snapshot.models.filter((m) =>
+      GLM_FLASH_RE.test(suffixOf(m.id))
+    );
+    if (candidates.length === 0) return null;
+    return [...candidates].sort((a, b) => {
+      const pa = glmVersionParts(suffixOf(a.id));
+      const pb = glmVersionParts(suffixOf(b.id));
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    })[0];
+  }, [snapshot]);
+
+  const rows = useMemo<BarRowSpec[]>(() => {
+    if (!estimate || usedPct == null) return [];
+    const refSuffix = refModel ? suffixOf(refModel.id) : "";
+    const total7dCost = estimate.models.reduce(
+      (sum, m) => sum + dailyCostAvg(m.daily ?? [], 7),
+      0
+    );
+
+    const used: BarRowSpec[] = [];
+    let refBurned = 0;
+    for (const m of estimate.models) {
+      if (m.usage == null || m.usage <= 0) continue;
+      if (refSuffix && m.model === refSuffix) {
+        refBurned = m.burnedFraction;
+        continue;
+      }
+      const rate = dailyCostAvg(m.daily ?? [], 7) / m.usage;
+      used.push({
+        key: m.model,
+        label: m.model,
+        isRef: false,
+        fillPct: m.burnedFraction * 100,
+        rateFracPerDay: rate,
+        projectedPct: usedPct + rate * 100 * daysRemaining,
+      });
     }
-    const projected = estimate.estUsedPct + rate * 100 * daysRemaining;
-    if (projected > 100) {
-      const daysToCap = (100 - estimate.estUsedPct) / (rate * 100);
+    used.sort((a, b) => b.projectedPct - a.projectedPct);
+
+    if (refModel) {
+      const rate = total7dCost / refModel.usage;
+      used.unshift({
+        key: refSuffix,
+        label: t("estGlmFlashRef"),
+        isRef: true,
+        fillPct: refBurned * 100,
+        rateFracPerDay: rate,
+        projectedPct: usedPct + rate * 100 * daysRemaining,
+      });
+    }
+    return used;
+  }, [estimate, usedPct, refModel, daysRemaining, t]);
+
+  function rightLabel(
+    rateFracPerDay: number,
+    projectedPct: number
+  ): ReactNode {
+    if (rateFracPerDay <= 0) {
+      return <span className="text-kumo-subtle">—</span>;
+    }
+    if (projectedPct > 100) {
+      const used = estimate?.estUsedPct ?? 0;
+      const daysToCap = (100 - used) / (rateFracPerDay * 100);
       const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
         localeTag(locale),
         { month: "short", day: "numeric" }
       );
       const early = Math.max(0, Math.round(daysRemaining - daysToCap));
       return (
-        <p key={label} className="m-0 mt-0.5 text-[11px]">
-          {labelSpan}
-          <span className={paceColor(projected)}>
-            {t("estCapOn", { date: capDate, early })}
-          </span>
-        </p>
+        <span className={paceColor(projectedPct)}>
+          {t("estCapShort", { date: capDate, early })}
+        </span>
       );
     }
     return (
-      <p key={label} className="m-0 mt-0.5 text-[11px]">
-        {labelSpan}
-        <span className={paceColor(projected)}>
-          {t("estFinish", { pct: fmt1(projected) })}
-        </span>
-      </p>
+      <span className={paceColor(projectedPct)}>{fmt1(projectedPct)}%</span>
     );
   }
 
@@ -233,136 +307,100 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
         </Text>
       ) : (
         <>
-          <div className="mt-3">
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <Text variant="secondary" as="span">
-                {t("estUsed")}
-              </Text>
-              <span
-                className={`font-medium tabular-nums ${usageTextColor(barPct)}`}
-              >
-                {usedPct}%
-              </span>
-            </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-kumo-recessed">
-              <div
-                className={`h-full rounded-full transition-all ${usageBarColor(barPct)}`}
-                style={{ width: `${Math.max(barPct, 2)}%` }}
-              />
-            </div>
-            <div className="mt-1 flex gap-2 text-[11px] text-kumo-subtle">
-              <span>
-                {t("estOfficial")}:{" "}
-                {estimate.officialMonthlyPct != null
-                  ? `${estimate.officialMonthlyPct}%`
-                  : "—"}
-              </span>
-              {delta != null ? (
-                <span
-                  className={
-                    Math.abs(delta) <= 2
-                      ? "text-kumo-success"
-                      : "text-kumo-warning"
-                  }
-                >
-                  Δ {delta > 0 ? "+" : ""}
-                  {delta}
-                </span>
-              ) : null}
-            </div>
+          <BarRow
+            label={`${t("estUsed")} ${usedPct}%`}
+            fillPct={barPct}
+            fillColor={
+              barPct >= 75
+                ? "#e5484d"
+                : barPct >= 50
+                  ? "#f5a524"
+                  : "#30a46c"
+            }
+            solidPct={null}
+            dottedPct={overallRate > 0 ? overallProjected : null}
+            dottedClassName={paceColor(overallProjected ?? 0)}
+            right={
+              overallRate > 0 && overallProjected != null
+                ? rightLabel(overallRate, overallProjected)
+                : (
+                    <span className="text-kumo-subtle">—</span>
+                  )
+            }
+          />
 
-            {pacePct != null ? (
-              <p className={`m-0 mt-2 text-[11px] ${paceColor(pacePct)}`}>
-                {t("estPace", {
-                  pace: fmt1(pacePct),
-                  day: Math.max(1, Math.ceil(elapsedDays)),
-                  total: Math.round(windowDays),
-                })}
-              </p>
-            ) : estimate ? (
-              <p className="m-0 mt-2 text-[11px] text-kumo-subtle">
-                {t("estResetAgo", {
-                  hours: Math.max(0, Math.floor(elapsedDays * 24)),
-                })}
-              </p>
+          <div className="mt-1 flex gap-2 text-[11px] text-kumo-subtle">
+            <span>
+              {t("estOfficial")}:{" "}
+              {estimate.officialMonthlyPct != null
+                ? `${estimate.officialMonthlyPct}%`
+                : "—"}
+            </span>
+            {delta != null ? (
+              <span
+                className={
+                  Math.abs(delta) <= 2
+                    ? "text-kumo-success"
+                    : "text-kumo-warning"
+                }
+              >
+                Δ {delta > 0 ? "+" : ""}
+                {delta}
+              </span>
             ) : null}
-            {lookbackLine(t("est3d"), 3)}
-            {lookbackLine(t("est7d"), 7)}
+            <span className={paceColor(overallProjected ?? 0)}>
+              {t("estLegend")}
+            </span>
           </div>
 
-          {estimate.models.length > 0 ? (
-            <div className="mt-3 flex flex-col gap-2">
-              <select
-                className="self-start rounded-md border border-kumo-line bg-kumo-elevated px-2 py-1.5 text-xs"
-                value={selected}
-                onChange={(e) => setSelected(e.target.value)}
-                aria-label={t("colModel")}
-              >
-                {estimate.models.map((m) => (
-                  <option key={m.model} value={m.model}>
-                    {m.model}
-                  </option>
-                ))}
-              </select>
+          {pacePct != null ? (
+            <p className={`m-0 mt-2 text-[11px] ${paceColor(pacePct)}`}>
+              {t("estPace", {
+                pace: fmt1(pacePct),
+                day: Math.max(1, Math.ceil(elapsedDays)),
+                total: Math.round(windowDays),
+              })}
+            </p>
+          ) : estimate ? (
+            <p className="m-0 mt-2 text-[11px] text-kumo-subtle">
+              {t("estResetAgo", {
+                hours: Math.max(0, Math.floor(elapsedDays * 24)),
+              })}
+            </p>
+          ) : null}
 
-              {projection ? (
-                <div className="flex flex-col gap-1 text-xs">
-                  {projection.offRow && projection.peakRow ? (
-                    <>
-                      <span className="text-kumo-default">
-                        {t("estOffPeak", {
-                          req: fmtReq(projection.remainingUsd / costPerReq(projection.offRow)),
-                          tok: fmtTok(
-                            (projection.remainingUsd / costPerReq(projection.offRow)) *
-                              patternTokens(projection.offRow)
-                          ),
-                        })}
-                        {!projection.peakNow ? (
-                          <span className="ml-1 text-kumo-subtle">
-                            · {t("estNow")}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="text-kumo-default">
-                        {t("estPeak", {
-                          req: fmtReq(projection.remainingUsd / costPerReq(projection.peakRow)),
-                          tok: fmtTok(
-                            (projection.remainingUsd / costPerReq(projection.peakRow)) *
-                              patternTokens(projection.peakRow)
-                          ),
-                        })}
-                        {projection.peakNow ? (
-                          <span className="ml-1 text-kumo-warning">
-                            · {t("estNow")}
-                          </span>
-                        ) : null}
-                      </span>
-                    </>
-                  ) : projection.baseRow ? (
-                    <span className="text-kumo-default">
-                      {t("estProjection", {
-                        req: fmtReq(projection.remainingUsd / costPerReq(projection.baseRow)),
-                        tok: fmtTok(
-                          (projection.remainingUsd / costPerReq(projection.baseRow)) *
-                            patternTokens(projection.baseRow)
-                        ),
-                      })}
-                    </span>
-                  ) : null}
-                  {selectedRow?.usage != null ? (
-                    <span className="text-kumo-subtle">
-                      ${(Math.round(projection.remainingUsd * 100) / 100).toFixed(2)} / ${selectedRow.usage}
-                    </span>
+          {rows.length > 0 ? (
+            <div className="mt-3">
+              {rows.map((row, index) => (
+                <div key={row.key}>
+                  <BarRow
+                    label={row.label}
+                    mutedLabel={row.isRef}
+                    fillPct={row.fillPct}
+                    fillColor={paletteColor(index)}
+                    solidPct={usedPct}
+                    dottedPct={
+                      row.rateFracPerDay > 0
+                        ? Math.max(row.projectedPct, usedPct + 0.5)
+                        : null
+                    }
+                    dottedClassName={paceColor(row.projectedPct)}
+                    right={rightLabel(row.rateFracPerDay, row.projectedPct)}
+                  />
+                  {row.isRef && row.fillPct === 0 ? (
+                    <p className="m-0 mt-0.5 text-[10px] text-kumo-subtle">
+                      {t("estRefScenario")}
+                    </p>
                   ) : null}
                 </div>
-              ) : (
-                <Text variant="secondary" as="p" DANGEROUS_className="m-0 text-xs">
-                  {t("estNoPrices")}
-                </Text>
-              )}
+              ))}
             </div>
           ) : (
-            <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-3 text-sm">
+            <Text
+              variant="secondary"
+              as="p"
+              DANGEROUS_className="m-0 mt-3 text-sm"
+            >
               {t("estNoData")}
             </Text>
           )}
@@ -391,11 +429,15 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
             </Text>
           ) : null}
 
-          <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-2 text-[11px]">
+          <Text
+            variant="secondary"
+            as="p"
+            DANGEROUS_className="m-0 mt-2 text-[11px]"
+          >
             {t("estPriceFrom", {
-              date: new Date(estimate.priceFetchedAt ?? snapshot.fetchedAt).toLocaleDateString(
-                localeTag(locale)
-              ),
+              date: new Date(
+                estimate.priceFetchedAt ?? snapshot.fetchedAt
+              ).toLocaleDateString(localeTag(locale)),
               credit: snapshot.monthlyCost,
             })}
           </Text>
