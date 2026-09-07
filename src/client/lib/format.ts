@@ -40,3 +40,11 @@ export function usageTextColor(percent: number): string {
   if (status === "warn") return "text-kumo-warning";
   return "text-kumo-success";
 }
+
+export function fmtDM(date: Date): string {
+  return `${date.getDate()}/${date.getMonth() + 1}`;
+}
+
+export function fmtDMY(date: Date): string {
+  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+}

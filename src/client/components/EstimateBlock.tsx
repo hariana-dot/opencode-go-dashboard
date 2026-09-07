@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEstimate, getPriceSnapshot, syncUsageHistory } from "../lib/api";
 import { paletteColor } from "../lib/colors";
-import { usageBarColor, usageTextColor } from "../lib/format";
+import { fmtDM, fmtDMY, usageBarColor, usageTextColor } from "../lib/format";
 import { usePrefs } from "../lib/prefs";
 import type {
   EstimateResult,
@@ -32,14 +32,6 @@ function fmtUsd(n: number): string {
 
 function rowLabel(row: EstimateSpendRow): string {
   return row.model;
-}
-
-function fmtDM(date: Date): string {
-  return `${date.getDate()}/${date.getMonth() + 1}`;
-}
-
-function fmtDMY(date: Date): string {
-  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
 }
 
 function modelSuffix(id: string): string {

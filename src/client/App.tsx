@@ -209,6 +209,14 @@ export default function App() {
         <Text variant="heading2" as="h1" DANGEROUS_className="m-0">
           {t("title")}
         </Text>
+        <a
+          className="text-xs underline text-kumo-subtle"
+          href="https://github.com/hariana-dot/opencode-go-dashboard"
+          target="_blank"
+          rel="noreferrer"
+        >
+          github.com/hariana-dot/opencode-go-dashboard
+        </a>
         <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-1 text-sm">
           {t("subtitle")}
         </Text>

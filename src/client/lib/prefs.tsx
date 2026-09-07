@@ -21,7 +21,19 @@ function readRefModel(): string {
 
 function readLocale(): Locale {
   const raw = localStorage.getItem(LOCALE_KEY);
-  if (raw === "en" || raw === "zh-CN" || raw === "zh-TW" || raw === "ja") {
+  if (
+    raw === "en" ||
+    raw === "zh-CN" ||
+    raw === "zh-TW" ||
+    raw === "ja" ||
+    raw === "es" ||
+    raw === "de" ||
+    raw === "ru" ||
+    raw === "fr" ||
+    raw === "pt" ||
+    raw === "tr" ||
+    raw === "it"
+  ) {
     return raw;
   }
   return "zh-CN";
