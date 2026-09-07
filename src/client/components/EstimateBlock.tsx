@@ -62,6 +62,18 @@ function fmtTok(n: number): string {
   return String(Math.round(n));
 }
 
+const DAY_MS = 86_400_000;
+
+function paceColor(pct: number): string {
+  if (pct > 130) return "text-kumo-danger";
+  if (pct >= 100) return "text-kumo-warning";
+  return "text-kumo-success";
+}
+
+function fmt1(n: number): string {
+  return String(Math.round(n * 10) / 10);
+}
+
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
   const { locale, t } = usePrefs();
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
@@ -120,6 +132,78 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     usedPct != null && estimate?.officialMonthlyPct != null
       ? Math.round((usedPct - estimate.officialMonthlyPct) * 10) / 10
       : null;
+
+  const nowMs = Date.now();
+  const windowStartMs = estimate ? Date.parse(estimate.windowStart) : NaN;
+  const windowDays = estimate ? estimate.windowLengthMs / DAY_MS : 30;
+  const elapsedDays =
+    estimate && !Number.isNaN(windowStartMs)
+      ? (nowMs - windowStartMs) / DAY_MS
+      : 0;
+  const pacePct =
+    estimate?.estUsedPct != null && elapsedDays >= 0.5
+      ? (estimate.estUsedPct * windowDays) / Math.max(elapsedDays, 0.01)
+      : null;
+  const daysRemaining =
+    estimate && !Number.isNaN(windowStartMs)
+      ? Math.max(0, (windowStartMs + estimate.windowLengthMs - nowMs) / DAY_MS)
+      : 0;
+
+  function dailyRate(lookbackDays: number): number {
+    if (!estimate) return 0;
+    const byDate = new Map(
+      estimate.dailyBurn.map((point) => [point.date, point.fraction])
+    );
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    let sum = 0;
+    for (let i = 1; i <= lookbackDays; i++) {
+      const day = new Date(todayUtc.getTime() - i * DAY_MS)
+        .toISOString()
+        .slice(0, 10);
+      sum += byDate.get(day) ?? 0;
+    }
+    return sum / lookbackDays;
+  }
+
+  function lookbackLine(label: string, lookbackDays: number) {
+    if (estimate?.estUsedPct == null) return null;
+    const rate = dailyRate(lookbackDays);
+    const labelSpan = <span className="text-kumo-subtle">{label}: </span>;
+    if (rate <= 0) {
+      return (
+        <p key={label} className="m-0 mt-0.5 text-[11px]">
+          {labelSpan}
+          <span className="text-kumo-subtle">{t("estNoExhaust")}</span>
+        </p>
+      );
+    }
+    const projected = estimate.estUsedPct + rate * 100 * daysRemaining;
+    if (projected > 100) {
+      const daysToCap = (100 - estimate.estUsedPct) / (rate * 100);
+      const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
+        localeTag(locale),
+        { month: "short", day: "numeric" }
+      );
+      const early = Math.max(0, Math.round(daysRemaining - daysToCap));
+      return (
+        <p key={label} className="m-0 mt-0.5 text-[11px]">
+          {labelSpan}
+          <span className={paceColor(projected)}>
+            {t("estCapOn", { date: capDate, early })}
+          </span>
+        </p>
+      );
+    }
+    return (
+      <p key={label} className="m-0 mt-0.5 text-[11px]">
+        {labelSpan}
+        <span className={paceColor(projected)}>
+          {t("estFinish", { pct: fmt1(projected) })}
+        </span>
+      </p>
+    );
+  }
 
   return (
     <div className="mt-5 border-t border-kumo-line pt-4">
@@ -186,6 +270,24 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
                 </span>
               ) : null}
             </div>
+
+            {pacePct != null ? (
+              <p className={`m-0 mt-2 text-[11px] ${paceColor(pacePct)}`}>
+                {t("estPace", {
+                  pace: fmt1(pacePct),
+                  day: Math.max(1, Math.ceil(elapsedDays)),
+                  total: Math.round(windowDays),
+                })}
+              </p>
+            ) : estimate ? (
+              <p className="m-0 mt-2 text-[11px] text-kumo-subtle">
+                {t("estResetAgo", {
+                  hours: Math.max(0, Math.floor(elapsedDays * 24)),
+                })}
+              </p>
+            ) : null}
+            {lookbackLine(t("est3d"), 3)}
+            {lookbackLine(t("est7d"), 7)}
           </div>
 
           {estimate.models.length > 0 ? (

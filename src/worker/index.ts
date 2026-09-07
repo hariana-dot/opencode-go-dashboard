@@ -568,6 +568,7 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   }
   const acc = new Map<string, Acc>();
   const unmapped = new Map<string, number>();
+  const dailyBurnMap = new Map<string, number>();
   let approxRequests = 0;
   let unmappedRequests = 0;
   let totalBurned = 0;
@@ -593,6 +594,10 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       approxRequests += requests;
     }
     acc.set(suffix, entry);
+    dailyBurnMap.set(
+      group.day,
+      (dailyBurnMap.get(group.day) ?? 0) + costUsd / rate.usage
+    );
   }
 
   for (const entry of acc.values()) {
@@ -610,12 +615,19 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
 
   const estimate: EstimateResult = {
     windowStart,
+    windowLengthMs: ESTIMATE_WINDOW_MS,
     estUsedPct: snap ? Math.round(totalBurned * 1000) / 10 : null,
     estRemainingPct: snap
       ? Math.round(Math.max(0, 1 - totalBurned) * 1000) / 10
       : null,
     officialMonthlyPct: monthly?.usagePercent ?? null,
     officialResetInSec: monthly?.resetInSec ?? null,
+    dailyBurn: [...dailyBurnMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, fraction]) => ({
+        date,
+        fraction: Math.round(fraction * 1e6) / 1e6,
+      })),
     models,
     unmappedModels: [...unmapped.entries()].map(([model, requests]) => ({
       model,

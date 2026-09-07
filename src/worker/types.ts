@@ -121,12 +121,19 @@ export interface EstimateModelRow {
   requests: number;
 }
 
+export interface DailyBurnPoint {
+  date: string;
+  fraction: number;
+}
+
 export interface EstimateResult {
   windowStart: string;
+  windowLengthMs: number;
   estUsedPct: number | null;
   estRemainingPct: number | null;
   officialMonthlyPct: number | null;
   officialResetInSec: number | null;
+  dailyBurn: DailyBurnPoint[];
   models: EstimateModelRow[];
   unmappedModels: { model: string; requests: number }[];
   unmappedRequests: number;
