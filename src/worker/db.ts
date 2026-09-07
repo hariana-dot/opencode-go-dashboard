@@ -308,6 +308,7 @@ export async function getUsageSync(
     .prepare(
       "SELECT last_synced_at, last_cursor, oldest_synced_at, last_record_at FROM usage_sync WHERE account_id = ?"
     )
+    .bind(accountId)
     .first<{
       last_synced_at: string | null;
       last_cursor: number;
