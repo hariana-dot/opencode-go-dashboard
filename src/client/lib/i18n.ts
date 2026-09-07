@@ -98,7 +98,7 @@ const STRINGS = {
     themeSystem: "System",
     estTitle: "Monthly estimate",
     estHint:
-      "Bars start at current monthly usage. Dotted = projected overall usage at reset if that model's 7-day spend continues, measured against the overall remaining pool. Max = the model's monthly dollar allowance.",
+      "Bars start at current monthly usage. Dotted = projected usage at reset with your total 7-day request pace priced at that model's rates, measured against the overall remaining pool. Max = the model's monthly dollar allowance.",
     estRecords: "{n} requests in window",
     estMaxUsd: "max {n}",
     estByReset: "{n} by reset",
@@ -197,7 +197,7 @@ const STRINGS = {
     themeSystem: "系统",
     estTitle: "月度估算",
     estHint:
-      "柱线起点为当前月度用量。虚线 = 若该模型保持近 7 天支出，月底的总体用量预测（按总体剩余额度衡量）。上限 = 该模型的月度美元额度。",
+      "柱线起点为当前月度用量。虚线 = 按该模型单价折算近 7 天整体请求量后的月底用量预测（以总体剩余额度衡量）。上限 = 该模型的月度美元额度。",
     estRecords: "窗口内 {n} 条请求",
     estMaxUsd: "上限 {n}",
     estByReset: "月底前 {n}",
@@ -296,7 +296,7 @@ const STRINGS = {
     themeSystem: "系統",
     estTitle: "月度估算",
     estHint:
-      "柱線起點為目前月度用量。虛線 = 若該模型保持近 7 天支出，月底的總體用量預測（按總體剩餘額度衡量）。上限 = 該模型的月度美元額度。",
+      "柱線起點為目前月度用量。虛線 = 按該模型單價折算近 7 天整體請求量後的月底用量預測（以總體剩餘額度衡量）。上限 = 該模型的月度美元額度。",
     estRecords: "視窗內 {n} 條請求",
     estMaxUsd: "上限 {n}",
     estByReset: "月底前 {n}",
@@ -396,7 +396,7 @@ const STRINGS = {
     themeSystem: "システム",
     estTitle: "月次見積",
     estHint:
-      "バーの起点は現在の月次使用率。点線 = このモデルの直近7日の支出が続いた場合の期末の全体使用率予測（全体の残りプール基準）。上限 = 各モデルの月額ドル許容量。",
+      "バーの起点は現在の月次使用率。点線 = 直近7日の全体リクエスト量をそのモデルの単価で換算した場合の期末使用率予測（全体の残りプール基準）。上限 = 各モデルの月額ドル許容量。",
     estRecords: "期間内 {n} リクエスト",
     estMaxUsd: "上限 {n}",
     estByReset: "リセットまで {n}",

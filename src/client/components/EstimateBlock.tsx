@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchEstimate, getPriceSnapshot, syncUsageHistory } from "../lib/api";
 import { paletteColor } from "../lib/colors";
 import { usageBarColor, usageTextColor } from "../lib/format";
-import { localeTag } from "../lib/i18n";
 import { usePrefs } from "../lib/prefs";
 import type {
   EstimateResult,
@@ -36,7 +35,7 @@ function rowLabel(row: EstimateSpendRow): string {
 }
 
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
-  const { locale, t } = usePrefs();
+  const { t } = usePrefs();
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
   const [snapshot, setSnapshot] = useState<PriceSnapshotData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,8 +112,8 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       const remainingUsd = ((100 - officialPct) / 100) * poolUsd;
       const daysToCap = remainingUsd / row.rate7UsdPerDay;
       const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
-        localeTag(locale),
-        { month: "short", day: "numeric" }
+        "en-GB",
+        { day: "numeric", month: "short" }
       );
       const early = Math.max(0, Math.round(daysRemaining - daysToCap));
       return (
@@ -241,9 +240,11 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
             DANGEROUS_className="m-0 mt-2 text-[11px]"
           >
             {t("estPriceFrom", {
-              date: new Date(snapshot.fetchedAt).toLocaleDateString(
-                localeTag(locale)
-              ),
+              date: new Date(snapshot.fetchedAt).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              }),
               credit: snapshot.monthlyCost,
             })}
           </Text>

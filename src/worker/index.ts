@@ -616,16 +616,6 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   const targets = new Set<string>(usedSuffixes);
   if (refSuffix) targets.add(refSuffix);
 
-  const spend = new Map<string, Map<string, number>>();
-  for (const rec of records) {
-    const suffix = suffixOf(rec.model);
-    if (!targets.has(suffix)) continue;
-    const day = rec.time_created.slice(0, 10);
-    const days = spend.get(suffix) ?? new Map<string, number>();
-    days.set(day, (days.get(day) ?? 0) + Number(rec.cost ?? 0) / 1e9);
-    spend.set(suffix, days);
-  }
-
   const last7Days: string[] = [];
   for (let i = 1; i <= 7; i++) {
     last7Days.push(
@@ -635,27 +625,67 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
 
   const officialPct = monthly?.usagePercent ?? null;
   let totalSpend = 0;
+  let totalReq7 = 0;
+  const spend7 = new Map<string, number>();
+  const spendWin = new Map<string, number>();
+  const req7 = new Map<string, number>();
+  const reqWin = new Map<string, number>();
   for (const rec of records) {
-    if (free.has(suffixOf(rec.model))) continue;
-    totalSpend += Number(rec.cost ?? 0) / 1e9;
+    const suffix = suffixOf(rec.model);
+    if (free.has(suffix)) continue;
+    const usd = Number(rec.cost ?? 0) / 1e9;
+    totalSpend += usd;
+    reqWin.set(suffix, (reqWin.get(suffix) ?? 0) + 1);
+    spendWin.set(suffix, (spendWin.get(suffix) ?? 0) + usd);
+    if (last7Days.includes(rec.time_created.slice(0, 10))) {
+      req7.set(suffix, (req7.get(suffix) ?? 0) + 1);
+      spend7.set(suffix, (spend7.get(suffix) ?? 0) + usd);
+      totalReq7 += 1;
+    }
   }
   const poolUsd =
     officialPct != null && officialPct > 0 && totalSpend > 0
       ? Math.round((totalSpend / (officialPct / 100)) * 100) / 100
       : null;
+  const totalReqPerDay = totalReq7 / 7;
+
+  function patternCostPerReq(suffix: string): number {
+    for (const variant of pricedRows.get(suffix) ?? []) {
+      const p = variant.pattern;
+      if (!p) continue;
+      const cw = variant.cachedWrite ?? variant.input ?? 0;
+      const input = variant.input ?? 0;
+      const read = variant.cachedRead ?? 0;
+      const output = variant.output ?? 0;
+      const per =
+        ((0.05 * input + 0.95 * cw) * p.input +
+          read * p.cachedRead +
+          output * p.output) /
+        1e6;
+      if (per > 0) return per;
+    }
+    return 0;
+  }
+
+  function costPerReq(suffix: string): number {
+    const r7 = req7.get(suffix) ?? 0;
+    if (r7 > 0) return (spend7.get(suffix) ?? 0) / r7;
+    const rw = reqWin.get(suffix) ?? 0;
+    if (rw > 0) return (spendWin.get(suffix) ?? 0) / rw;
+    return patternCostPerReq(suffix);
+  }
 
   function rowFor(suffix: string): EstimateSpendRow | null {
     const variants = pricedRows.get(suffix);
     if (!variants || variants.length === 0) return null;
     const usage = Math.max(...variants.map((r) => r.usage ?? 0));
     if (!(usage > 0)) return null;
-    const days = spend.get(suffix);
-    let sum7 = 0;
-    for (const day of last7Days) sum7 += days?.get(day) ?? 0;
+    const perReq = costPerReq(suffix);
+    const pace = perReq > 0 ? totalReqPerDay * perReq : 0;
     return {
       model: suffix,
       usage,
-      rate7UsdPerDay: Math.round((sum7 / 7) * 1e4) / 1e4,
+      rate7UsdPerDay: Math.round(pace * 1e4) / 1e4,
     };
   }
 
