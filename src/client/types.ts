@@ -83,3 +83,47 @@ export interface UsageSyncResult {
 }
 
 export const COST_SCALE = 1_000_000_000;
+
+export interface PriceModel {
+  id: string;
+  name?: string;
+  tier?: string | null;
+  input?: number;
+  output?: number;
+  cachedRead?: number;
+  cachedWrite?: number | null;
+  usage: number;
+  pattern?: { input: number; cachedRead: number; output: number };
+  contextWindow?: number;
+  provider?: string;
+}
+
+export interface PriceSnapshotData {
+  fetchedAt: string;
+  snapshotDate: string;
+  monthlyCredit: number;
+  monthlyCost: number;
+  peakHours: Record<string, [number, number][]> | null;
+  models: PriceModel[];
+  freeModels: { id: string }[] | null;
+}
+
+export interface EstimateModelRow {
+  model: string;
+  usage: number | null;
+  burnedFraction: number;
+  requests: number;
+}
+
+export interface EstimateResult {
+  windowStart: string;
+  estUsedPct: number | null;
+  estRemainingPct: number | null;
+  officialMonthlyPct: number | null;
+  officialResetInSec: number | null;
+  models: EstimateModelRow[];
+  unmappedModels: { model: string; requests: number }[];
+  unmappedRequests: number;
+  approxRequests: number;
+  priceFetchedAt: string | null;
+}

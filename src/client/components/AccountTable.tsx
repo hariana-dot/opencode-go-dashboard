@@ -9,6 +9,7 @@ import { localeTag } from "../lib/i18n";
 import { usePrefs } from "../lib/prefs";
 import type { AccountWithUsage } from "../types";
 import CostChart from "./CostChart";
+import EstimateBlock from "./EstimateBlock";
 import UsageBar from "./UsageBar";
 
 interface Props {
@@ -151,6 +152,8 @@ export default function AccountTable({
               ) : null}
 
               <CostChart accountId={account.id} refreshToken={chartToken} />
+
+              <EstimateBlock accountId={account.id} refreshToken={chartToken} />
             </div>
           </article>
         );

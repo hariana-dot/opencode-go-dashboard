@@ -8,12 +8,16 @@ import {
   createAccount,
   deleteAccount,
   getAccountRow,
+  getLatestPriceSnapshot,
   getUsageOverview,
   listAccounts,
+  listModelUsageDays,
   saveUsageSync,
+  suffixOf,
   updateAccount,
   upsertUsageRecords,
 } from "./db";
+import { ingestLatestPrices } from "./prices";
 import {
   fetchGoQuota,
   fetchGoUsageHistory,
@@ -23,6 +27,8 @@ import {
 import type {
   AccountWithUsage,
   CreateAccountBody,
+  EstimateResult,
+  PricingPayload,
   UpdateAccountBody,
   UsageHistoryItem,
   UsageResult,
@@ -30,6 +36,9 @@ import type {
 
 const SYNC_PAGES_PER_REQUEST = 2;
 const HISTORY_PAGE_FULL = 40;
+const ESTIMATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const COST_SCALE = 1_000_000_000;
+const EXTRA_FREE_SUFFIXES = ["big-pickle"];
 
 export interface Env {
   ASSETS: Fetcher;
@@ -52,7 +61,19 @@ export default {
 
     return env.ASSETS.fetch(request);
   },
-};
+
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    ctx.waitUntil(
+      ingestLatestPrices(env.DB).catch((err) =>
+        console.error("price ingest failed", err)
+      )
+    );
+  },
+} satisfies ExportedHandler<Env>;
 
 async function handleApi(
   request: Request,
@@ -120,6 +141,21 @@ async function handleApi(
   );
   if (overviewMatch && request.method === "GET") {
     return handleOverview(request, env, overviewMatch[1]);
+  }
+
+  const estimateMatch = url.pathname.match(
+    /^\/api\/accounts\/([^/]+)\/estimate$/
+  );
+  if (estimateMatch && request.method === "GET") {
+    return handleEstimate(env, estimateMatch[1]);
+  }
+
+  if (url.pathname === "/api/prices/latest" && request.method === "GET") {
+    return handlePricesLatest(env);
+  }
+
+  if (url.pathname === "/api/prices/refresh" && request.method === "POST") {
+    return handlePricesRefresh(env);
   }
 
   if (url.pathname === "/api/refresh" && request.method === "POST") {
@@ -414,4 +450,180 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: JSON_HEADERS,
   });
+}
+
+function parsePayload(raw: string | null): PricingPayload | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PricingPayload;
+  } catch {
+    return null;
+  }
+}
+
+async function handlePricesLatest(env: Env): Promise<Response> {
+  const snap = await getLatestPriceSnapshot(env.DB);
+  if (!snap) return json({ snapshot: null, stale: true });
+  const stale = Date.now() - Date.parse(snap.fetched_at) > 12 * 3600 * 1000;
+  const payload = parsePayload(snap.payload);
+  return json({
+    snapshot: payload
+      ? {
+          fetchedAt: snap.fetched_at,
+          snapshotDate: snap.snapshot_date,
+          monthlyCredit: snap.monthly_credit,
+          monthlyCost: snap.monthly_cost,
+          peakHours: payload.peakHours ?? null,
+          models: payload.models ?? [],
+          freeModels: payload.freeModels ?? null,
+        }
+      : null,
+    stale,
+  });
+}
+
+async function handlePricesRefresh(env: Env): Promise<Response> {
+  try {
+    await ingestLatestPrices(env.DB);
+    return json({ ok: true });
+  } catch (err) {
+    return json(
+      { ok: false, error: err instanceof Error ? err.message : "同步价格失败" },
+      502
+    );
+  }
+}
+
+async function handleEstimate(env: Env, id: string): Promise<Response> {
+  const row = await getAccountRow(env.DB, id);
+  if (!row) return json({ error: "账号不存在" }, 404);
+
+  let official: UsageResult | null = null;
+  try {
+    official = await fetchGoQuota(row.workspace_id, row.auth_cookie);
+  } catch {
+    official = null;
+  }
+  const monthly = official?.monthly ?? null;
+
+  const nowMs = Date.now();
+  const windowStartMs =
+    monthly?.resetInSec != null
+      ? nowMs + monthly.resetInSec * 1000 - ESTIMATE_WINDOW_MS
+      : nowMs - ESTIMATE_WINDOW_MS;
+  const windowStart = new Date(windowStartMs).toISOString();
+
+  const snap = await getLatestPriceSnapshot(env.DB);
+  const payload = parsePayload(snap?.payload ?? null);
+  const free = new Set<string>(EXTRA_FREE_SUFFIXES);
+  for (const item of payload?.freeModels ?? []) {
+    const suffix = suffixOf(String(item?.id ?? ""));
+    if (suffix) free.add(suffix);
+  }
+
+  const usageDays = await listModelUsageDays(env.DB);
+  const usageByModel = new Map<string, { date: string; usage: number }[]>();
+  for (const day of usageDays) {
+    const list = usageByModel.get(day.model_suffix) ?? [];
+    list.push({ date: day.snapshot_date, usage: day.usage });
+    usageByModel.set(day.model_suffix, list);
+  }
+  for (const list of usageByModel.values()) {
+    list.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function usageAt(
+    suffix: string,
+    day: string
+  ): { usage: number; approx: boolean } | null {
+    const list = usageByModel.get(suffix);
+    if (!list || list.length === 0) return null;
+    let found: { date: string; usage: number } | null = null;
+    for (const item of list) {
+      if (item.date <= day) found = item;
+      else break;
+    }
+    let approx = false;
+    if (!found) {
+      found = list[0];
+      approx = true;
+    }
+    return { usage: found.usage, approx };
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT model, substr(time_created, 1, 10) AS day, SUM(cost) AS cost, COUNT(*) AS n
+     FROM usage_records
+     WHERE account_id = ? AND time_created >= ?
+     GROUP BY model, day`
+  )
+    .bind(id, windowStart)
+    .all<{ model: string; day: string; cost: number; n: number }>();
+
+  interface Acc {
+    requests: number;
+    burned: number;
+    approx: number;
+    usage: number | null;
+  }
+  const acc = new Map<string, Acc>();
+  const unmapped = new Map<string, number>();
+  let approxRequests = 0;
+  let unmappedRequests = 0;
+  let totalBurned = 0;
+
+  for (const group of results ?? []) {
+    const suffix = suffixOf(group.model);
+    const requests = Number(group.n);
+    const costUsd = Number(group.cost) / COST_SCALE;
+    if (free.has(suffix)) continue;
+    const rate = usageAt(suffix, group.day);
+    if (!rate) {
+      unmapped.set(group.model, (unmapped.get(group.model) ?? 0) + requests);
+      unmappedRequests += requests;
+      continue;
+    }
+    const entry =
+      acc.get(suffix) ??
+      ({ requests: 0, burned: 0, approx: 0, usage: rate.usage } as Acc);
+    entry.requests += requests;
+    entry.burned += costUsd / rate.usage;
+    if (rate.approx) {
+      entry.approx += requests;
+      approxRequests += requests;
+    }
+    acc.set(suffix, entry);
+  }
+
+  for (const entry of acc.values()) {
+    totalBurned += entry.burned;
+  }
+
+  const models = [...acc.entries()]
+    .map(([model, entry]) => ({
+      model,
+      usage: entry.usage,
+      burnedFraction: entry.burned,
+      requests: entry.requests,
+    }))
+    .sort((a, b) => b.burnedFraction - a.burnedFraction);
+
+  const estimate: EstimateResult = {
+    windowStart,
+    estUsedPct: snap ? Math.round(totalBurned * 1000) / 10 : null,
+    estRemainingPct: snap
+      ? Math.round(Math.max(0, 1 - totalBurned) * 1000) / 10
+      : null,
+    officialMonthlyPct: monthly?.usagePercent ?? null,
+    officialResetInSec: monthly?.resetInSec ?? null,
+    models,
+    unmappedModels: [...unmapped.entries()].map(([model, requests]) => ({
+      model,
+      requests,
+    })),
+    unmappedRequests,
+    approxRequests,
+    priceFetchedAt: snap?.fetched_at ?? null,
+  };
+  return json({ id, estimate });
 }

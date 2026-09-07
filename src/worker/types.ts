@@ -99,3 +99,61 @@ export interface UsageOverviewResult {
   keys: string[];
   lastSyncedAt: string | null;
 }
+
+export interface PriceSnapshotRow {
+  fetched_at: string;
+  snapshot_date: string;
+  monthly_credit: number;
+  monthly_cost: number;
+  payload: string | null;
+}
+
+export interface ModelUsageDayRow {
+  snapshot_date: string;
+  model_suffix: string;
+  usage: number;
+}
+
+export interface EstimateModelRow {
+  model: string;
+  usage: number | null;
+  burnedFraction: number;
+  requests: number;
+}
+
+export interface EstimateResult {
+  windowStart: string;
+  estUsedPct: number | null;
+  estRemainingPct: number | null;
+  officialMonthlyPct: number | null;
+  officialResetInSec: number | null;
+  models: EstimateModelRow[];
+  unmappedModels: { model: string; requests: number }[];
+  unmappedRequests: number;
+  approxRequests: number;
+  priceFetchedAt: string | null;
+}
+
+export interface PricingPayload {
+  fetchedAt: string;
+  monthlyCredit: number;
+  monthlyCost: number;
+  peakHours?: Record<string, [number, number][]>;
+  models: PricingModelRow[];
+  freeModels?: { id: string }[];
+}
+
+export interface PricingModelRow {
+  id: string;
+  name?: string;
+  tier?: string | null;
+  input?: number;
+  output?: number;
+  cachedRead?: number;
+  cachedWrite?: number | null;
+  usage: number;
+  pattern?: { input: number; cachedRead: number; output: number };
+  multiplier?: number;
+  contextWindow?: number;
+  provider?: string;
+}

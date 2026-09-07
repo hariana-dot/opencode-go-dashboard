@@ -2,10 +2,17 @@ import type {
   AccountPublic,
   AccountRow,
   CreateAccountBody,
+  ModelUsageDayRow,
+  PriceSnapshotRow,
   UpdateAccountBody,
   UsageHistoryItem,
   UsageOverviewResult,
 } from "./types";
+
+export function suffixOf(id: string): string {
+  const i = id.lastIndexOf("/");
+  return (i >= 0 ? id.slice(i + 1) : id).toLowerCase();
+}
 
 function toPublic(row: AccountRow): AccountPublic {
   return {
@@ -244,4 +251,74 @@ export async function getUsageOverview(
     keys: [...keySet].sort(),
     lastSyncedAt: sync.lastSyncedAt,
   };
+}
+export async function getLatestPriceSnapshot(
+  db: D1Database
+): Promise<PriceSnapshotRow | null> {
+  return db
+    .prepare(
+      "SELECT fetched_at, snapshot_date, monthly_credit, monthly_cost, payload FROM price_snapshots ORDER BY fetched_at DESC LIMIT 1"
+    )
+    .first<PriceSnapshotRow>();
+}
+
+export async function countPriceSnapshots(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS c FROM price_snapshots")
+    .first<{ c: number }>();
+  return row?.c ?? 0;
+}
+
+export async function insertPriceSnapshot(
+  db: D1Database,
+  data: {
+    fetchedAt: string;
+    snapshotDate: string;
+    monthlyCredit: number;
+    monthlyCost: number;
+    payload: string | null;
+  }
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `INSERT INTO price_snapshots (fetched_at, snapshot_date, monthly_credit, monthly_cost, payload)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(fetched_at) DO NOTHING`
+    )
+    .bind(
+      data.fetchedAt,
+      data.snapshotDate,
+      data.monthlyCredit,
+      data.monthlyCost,
+      data.payload
+    )
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function updatePricePayload(
+  db: D1Database,
+  fetchedAt: string,
+  payload: string
+): Promise<void> {
+  await db
+    .prepare("UPDATE price_snapshots SET payload = ? WHERE fetched_at = ?")
+    .bind(payload, fetchedAt)
+    .run();
+}
+
+export async function listModelUsageDays(
+  db: D1Database
+): Promise<ModelUsageDayRow[]> {
+  const { results } = await db
+    .prepare("SELECT snapshot_date, model_suffix, usage FROM model_usage_days")
+    .all<ModelUsageDayRow>();
+  return results ?? [];
+}
+
+export async function listUsedModelSuffixes(db: D1Database): Promise<string[]> {
+  const { results } = await db
+    .prepare("SELECT DISTINCT model FROM usage_records")
+    .all<{ model: string }>();
+  return (results ?? []).map((r) => suffixOf(r.model));
 }

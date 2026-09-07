@@ -4,6 +4,9 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-01",
   "workers_dev": true,
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  },
   // Optional: bind a custom domain after deploy
   // "routes": [
   //   {

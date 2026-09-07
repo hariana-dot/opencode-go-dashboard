@@ -2,6 +2,8 @@ import type {
   Account,
   AccountFormData,
   AccountWithUsage,
+  EstimateResult,
+  PriceSnapshotData,
   UsageHistoryResult,
   UsageOverviewResult,
   UsageResult,
@@ -143,4 +145,43 @@ export async function fetchUsageOverview(
     `/api/accounts/${id}/overview?year=${year}&month=${month}`
   );
   return data.overview;
+}
+
+export async function fetchEstimate(id: string): Promise<EstimateResult> {
+  const data = await request<{ id: string; estimate: EstimateResult }>(
+    `/api/accounts/${id}/estimate`
+  );
+  return data.estimate;
+}
+
+let priceCache: {
+  at: number;
+  snapshot: PriceSnapshotData | null;
+  stale: boolean;
+} | null = null;
+
+export async function getPriceSnapshot(): Promise<PriceSnapshotData | null> {
+  if (priceCache && Date.now() - priceCache.at < 5 * 60_000) {
+    return priceCache.snapshot;
+  }
+  let res = await request<{
+    snapshot: PriceSnapshotData | null;
+    stale: boolean;
+  }>("/api/prices/latest");
+  if (res.stale) {
+    try {
+      await request("/api/prices/refresh", {
+        method: "POST",
+        timeoutMs: 60000,
+      });
+      res = await request<{
+        snapshot: PriceSnapshotData | null;
+        stale: boolean;
+      }>("/api/prices/latest");
+    } catch {
+      // keep the stale snapshot rather than failing the whole view
+    }
+  }
+  priceCache = { at: Date.now(), snapshot: res.snapshot, stale: res.stale };
+  return res.snapshot;
 }
