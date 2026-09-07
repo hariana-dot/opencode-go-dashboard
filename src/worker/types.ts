@@ -112,11 +112,11 @@ export interface ModelUsageDayRow {
   usage: number;
 }
 
-export interface EstimateHypoModel {
+export interface EstimateRequestRow {
   model: string;
-  usage: number;
-  hypUsedPct: number;
-  rateFracPerDay: number;
+  tier: string | null;
+  requestsMo: number;
+  rate7PerDay: number;
 }
 
 export interface EstimateResult {
@@ -125,8 +125,8 @@ export interface EstimateResult {
   recordCount: number;
   officialMonthlyPct: number | null;
   officialResetInSec: number | null;
-  models: EstimateHypoModel[];
-  ref: EstimateHypoModel | null;
+  rows: EstimateRequestRow[];
+  ref: EstimateRequestRow | null;
 }
 
 export interface PricingPayload {

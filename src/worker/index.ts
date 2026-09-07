@@ -27,7 +27,7 @@ import {
 import type {
   AccountWithUsage,
   CreateAccountBody,
-  EstimateHypoModel,
+  EstimateRequestRow,
   EstimateResult,
   PricingModelRow,
   PricingPayload,
@@ -59,7 +59,15 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request, env, url);
+      try {
+        return await handleApi(request, env, url);
+      } catch (err) {
+        console.error("api error", err);
+        return json(
+          { error: err instanceof Error ? err.message : "internal error" },
+          500
+        );
+      }
     }
 
     return env.ASSETS.fetch(request);
@@ -561,43 +569,6 @@ function buildPricedModel(
   };
 }
 
-function pickRow(
-  pm: PricedModel,
-  hourUtc: number,
-  ctxTokens: number
-): PricingModelRow | null {
-  if (pm.peakRow && pm.offRow) {
-    const inPeak = pm.peakRanges.some(([from, to]) => hourUtc >= from && hourUtc < to);
-    return inPeak ? pm.peakRow : pm.offRow;
-  }
-  if (pm.upRow && ctxTokens > pm.threshold) return pm.upRow;
-  return pm.baseRow;
-}
-
-function hypCostUsd(
-  row: PricingModelRow,
-  rec: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_read_tokens: number;
-    cache_write_5m_tokens: number | null;
-    cache_write_1h_tokens: number | null;
-  }
-): number {
-  const input = row.input ?? 0;
-  const output = row.output ?? 0;
-  const cachedRead = row.cachedRead ?? 0;
-  const cachedWrite = row.cachedWrite ?? row.input ?? 0;
-  return (
-    (rec.input_tokens * input +
-      rec.output_tokens * output +
-      rec.cache_read_tokens * cachedRead +
-      ((rec.cache_write_5m_tokens ?? 0) + (rec.cache_write_1h_tokens ?? 0)) *
-        cachedWrite) /
-    1e6
-  );
-}
-
 function glmVersionParts(suffix: string): number[] {
   return (suffix.match(/\d+/g) ?? []).map(Number);
 }
@@ -663,22 +634,11 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   }
 
   const { results } = await env.DB.prepare(
-    `SELECT time_created, model, input_tokens, output_tokens, cache_read_tokens,
-            cache_write_5m_tokens, cache_write_1h_tokens
-     FROM usage_records
-     WHERE account_id = ? AND time_created >= ?
-     ORDER BY time_created DESC`
+    `SELECT time_created, model FROM usage_records
+     WHERE account_id = ? AND time_created >= ?`
   )
     .bind(id, windowStart)
-    .all<{
-      time_created: string;
-      model: string;
-      input_tokens: number;
-      output_tokens: number;
-      cache_read_tokens: number;
-      cache_write_5m_tokens: number | null;
-      cache_write_1h_tokens: number | null;
-    }>();
+    .all<{ time_created: string; model: string }>();
   const records = results ?? [];
 
   const usedSuffixes = new Set<string>();
@@ -692,32 +652,44 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   const targets = new Set<string>(usedSuffixes);
   if (refSuffix) targets.add(refSuffix);
 
-  const priced = new Map<string, PricedModel>();
+  const baseCount = new Map<string, Map<string, number>>();
+  const peakCount = new Map<string, Map<string, number>>();
+  const offCount = new Map<string, Map<string, number>>();
+
   for (const suffix of targets) {
-    const pm = buildPricedModel(
-      suffix,
-      pricedRows.get(suffix) ?? [],
-      payload?.peakHours ?? null
-    );
-    if (pm) priced.set(suffix, pm);
+    const variants = pricedRows.get(suffix) ?? [];
+    const hasTiers =
+      variants.some((r) => r.tier === "Peak") &&
+      variants.some((r) => r.tier === "Off-Peak");
+    if (hasTiers) {
+      peakCount.set(suffix, new Map());
+      offCount.set(suffix, new Map());
+    } else {
+      baseCount.set(suffix, new Map());
+    }
   }
 
-  const hyp = new Map<string, Map<string, number>>();
   for (const rec of records) {
+    const suffix = suffixOf(rec.model);
     const day = rec.time_created.slice(0, 10);
     const hour = Number(rec.time_created.slice(11, 13)) || 0;
-    const ctx =
-      rec.input_tokens +
-      rec.cache_read_tokens +
-      (rec.cache_write_5m_tokens ?? 0) +
-      (rec.cache_write_1h_tokens ?? 0);
-    for (const [suffix, pm] of priced) {
-      const priceRow = pickRow(pm, hour, ctx);
-      if (!priceRow) continue;
-      const cost = hypCostUsd(priceRow, rec);
-      const days = hyp.get(suffix) ?? new Map<string, number>();
-      days.set(day, (days.get(day) ?? 0) + cost);
-      hyp.set(suffix, days);
+    const bump = (map: Map<string, Map<string, number>>) => {
+      const days = map.get(suffix);
+      if (!days) return;
+      days.set(day, (days.get(day) ?? 0) + 1);
+    };
+    if (peakCount.has(suffix) && offCount.has(suffix)) {
+      const pm = buildPricedModel(
+        suffix,
+        pricedRows.get(suffix) ?? [],
+        payload?.peakHours ?? null
+      );
+      const inPeak = pm
+        ? pm.peakRanges.some(([from, to]) => hour >= from && hour < to)
+        : false;
+      bump(inPeak ? peakCount : offCount);
+    } else {
+      bump(baseCount);
     }
   }
 
@@ -728,35 +700,98 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     );
   }
 
-  function hypoFor(suffix: string): EstimateHypoModel | null {
-    const pm = priced.get(suffix);
-    if (!pm) return null;
-    const days = hyp.get(suffix);
-    let total = 0;
-    if (days) {
-      for (const value of days.values()) total += value;
-    }
-    let sum7 = 0;
-    for (const day of last7Days) sum7 += days?.get(day) ?? 0;
-    const rate7 = sum7 / 7;
-    return {
-      model: suffix,
-      usage: pm.usage,
-      hypUsedPct: Math.round((total / pm.usage) * 1000) / 10,
-      rateFracPerDay: Math.round((rate7 / pm.usage) * 1e8) / 1e8,
-    };
+  function ratePerDay(days: Map<string, number> | undefined): number {
+    if (!days) return 0;
+    let sum = 0;
+    for (const day of last7Days) sum += days.get(day) ?? 0;
+    return Math.round((sum / 7) * 1e4) / 1e4;
   }
 
-  const models: EstimateHypoModel[] = [];
+  function requestsMo(row: PricingModelRow, usage: number): number {
+    const p = row.pattern;
+    if (!p) return 0;
+    const cw = row.cachedWrite ?? row.input ?? 0;
+    const input = row.input ?? 0;
+    const read = row.cachedRead ?? 0;
+    const output = row.output ?? 0;
+    const per =
+      ((0.05 * input + 0.95 * cw) * p.input +
+        read * p.cachedRead +
+        output * p.output) /
+      1e6;
+    if (!(per > 0)) return 0;
+    return Math.round((usage / per) * 10) / 10;
+  }
+
+  const rows: EstimateRequestRow[] = [];
   for (const suffix of usedSuffixes) {
-    const hypo = hypoFor(suffix);
-    if (hypo) models.push(hypo);
+    const variants = pricedRows.get(suffix) ?? [];
+    if (baseCount.has(suffix)) {
+      const modelRow = variants.find(
+        (r) => r.tier !== "Peak" && r.tier !== "Off-Peak"
+      );
+      if (!modelRow) continue;
+      const limit = requestsMo(modelRow, modelRow.usage);
+      if (!(limit > 0)) continue;
+      rows.push({
+        model: suffix,
+        tier: null,
+        requestsMo: limit,
+        rate7PerDay: ratePerDay(baseCount.get(suffix)),
+      });
+    } else {
+      const peakRow = variants.find((r) => r.tier === "Peak");
+      const offRow = variants.find((r) => r.tier === "Off-Peak");
+      if (peakRow) {
+        const limit = requestsMo(peakRow, peakRow.usage);
+        if (limit > 0) {
+          rows.push({
+            model: suffix,
+            tier: "Peak",
+            requestsMo: limit,
+            rate7PerDay: ratePerDay(peakCount.get(suffix)),
+          });
+        }
+      }
+      if (offRow) {
+        const limit = requestsMo(offRow, offRow.usage);
+        if (limit > 0) {
+          rows.push({
+            model: suffix,
+            tier: "Off-Peak",
+            requestsMo: limit,
+            rate7PerDay: ratePerDay(offCount.get(suffix)),
+          });
+        }
+      }
+    }
   }
-  const projectedOf = (h: EstimateHypoModel) =>
-    h.hypUsedPct + h.rateFracPerDay * 100 * daysRemaining;
-  models.sort((a, b) => projectedOf(b) - projectedOf(a));
 
-  const ref = refSuffix ? hypoFor(refSuffix) : null;
+  let ref: EstimateRequestRow | null = null;
+  if (refSuffix) {
+    const refRows = pricedRows.get(refSuffix) ?? [];
+    const refRow =
+      refRows.find((r) => r.tier !== "Peak" && r.tier !== "Off-Peak") ??
+      refRows[0];
+    if (refRow) {
+      const limit = requestsMo(refRow, refRow.usage);
+      if (limit > 0) {
+        ref = {
+          model: refSuffix,
+          tier: null,
+          requestsMo: limit,
+          rate7PerDay: 0,
+        };
+      }
+    }
+  }
+
+  rows.sort((a, b) => {
+    const pa = a.rate7PerDay * daysRemaining;
+    const pb = b.rate7PerDay * daysRemaining;
+    if (pb !== pa) return pb - pa;
+    return b.requestsMo - a.requestsMo;
+  });
 
   const estimate: EstimateResult = {
     windowStart,
@@ -764,7 +799,7 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     recordCount: records.length,
     officialMonthlyPct: monthly?.usagePercent ?? null,
     officialResetInSec: monthly?.resetInSec ?? null,
-    models,
+    rows,
     ref,
   };
   return json({ id, estimate });

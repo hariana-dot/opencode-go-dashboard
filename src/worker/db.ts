@@ -206,7 +206,12 @@ export async function getUsageOverview(
     return { date, model, cost };
   });
 
-  const sync = await getUsageSync(db, accountId);
+  let sync: { lastSyncedAt: string | null } = { lastSyncedAt: null };
+  try {
+    sync = await getUsageSync(db, accountId);
+  } catch {
+    sync = { lastSyncedAt: null };
+  }
   return {
     year,
     month,
