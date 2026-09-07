@@ -527,17 +527,6 @@ async function handlePricesRefresh(env: Env): Promise<Response> {
   }
 }
 
-interface PricedModel {
-  suffix: string;
-  usage: number;
-  peakRow: PricingModelRow | null;
-  offRow: PricingModelRow | null;
-  baseRow: PricingModelRow | null;
-  upRow: PricingModelRow | null;
-  threshold: number;
-  peakRanges: [number, number][];
-}
-
 function glmVersionParts(suffix: string): number[] {
   return (suffix.match(/\d+/g) ?? []).map(Number);
 }

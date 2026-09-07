@@ -270,7 +270,13 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
             DANGEROUS_className="m-0 mt-2 text-[11px]"
           >
             {t("estPriceFrom", {
-              date: fmtDMY(new Date(snapshot.fetchedAt)),
+              date: `${fmtDMY(new Date(snapshot.fetchedAt))} ${new Date(
+                snapshot.fetchedAt
+              ).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })}`,
               credit: snapshot.monthlyCost,
             })}
           </Text>
