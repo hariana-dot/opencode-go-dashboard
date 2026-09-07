@@ -193,8 +193,10 @@ export async function getUsageOverview(
   const modelSet = new Set<string>();
   const keySet = new Set<string>();
   const merged = new Map<string, number>();
+  const hidden = new Set(["big-pickle"]);
 
   for (const row of rows) {
+    if (hidden.has(suffixOf(row.model))) continue;
     if (row.model) modelSet.add(row.model);
     if (row.key_id) keySet.add(row.key_id);
     const key = `${row.day}\t${row.model}`;

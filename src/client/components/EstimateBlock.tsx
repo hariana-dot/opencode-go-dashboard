@@ -1,6 +1,6 @@
 import { Loader, Text } from "@cloudflare/kumo";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEstimate, getPriceSnapshot, syncUsageHistory } from "../lib/api";
 import { paletteColor } from "../lib/colors";
 import { usageBarColor, usageTextColor } from "../lib/format";
@@ -34,8 +34,22 @@ function rowLabel(row: EstimateSpendRow): string {
   return row.model;
 }
 
+function fmtDM(date: Date): string {
+  return `${date.getDate()}/${date.getMonth() + 1}`;
+}
+
+function fmtDMY(date: Date): string {
+  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+}
+
+function modelSuffix(id: string): string {
+  const raw = id.toLowerCase();
+  const slash = raw.indexOf("/");
+  return slash >= 0 ? raw.slice(slash + 1) : raw;
+}
+
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
-  const { t } = usePrefs();
+  const { refModel, setRefModel, t } = usePrefs();
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
   const [snapshot, setSnapshot] = useState<PriceSnapshotData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +61,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     setError("");
     let first: EstimateResult;
     try {
-      first = await fetchEstimate(accountId);
+      first = await fetchEstimate(accountId, refModel || undefined);
       setEstimate(first);
       setSnapshot(await getPriceSnapshot());
     } catch (err) {
@@ -68,12 +82,12 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       if (result.error || result.done) break;
     }
     try {
-      setEstimate(await fetchEstimate(accountId));
+      setEstimate(await fetchEstimate(accountId, refModel || undefined));
     } catch {
       // keep the first estimate rather than failing the whole block
     }
     setSyncing(false);
-  }, [accountId, t]);
+  }, [accountId, refModel, t]);
 
   useEffect(() => {
     void load();
@@ -90,6 +104,17 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
   const poolUsd = estimate?.poolUsd ?? null;
   const officialBar =
     officialPct != null ? Math.min(100, Math.max(0, officialPct)) : 0;
+
+  const refOptions = useMemo(() => {
+    if (!snapshot) return [];
+    const seen = new Set<string>();
+    for (const model of snapshot.models) {
+      const suffix = modelSuffix(String(model.id ?? ""));
+      if (!suffix || suffix === "big-pickle") continue;
+      seen.add(suffix);
+    }
+    return [...seen].sort();
+  }, [snapshot]);
 
   function futureUsd(row: EstimateSpendRow): number {
     return row.rate7UsdPerDay * daysRemaining;
@@ -111,10 +136,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     if (projected > 100) {
       const remainingUsd = ((100 - officialPct) / 100) * poolUsd;
       const daysToCap = remainingUsd / row.rate7UsdPerDay;
-      const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
-        "en-GB",
-        { day: "numeric", month: "short" }
-      );
+      const capDate = fmtDM(new Date(nowMs + daysToCap * DAY_MS));
       const early = Math.max(0, Math.round(daysRemaining - daysToCap));
       return (
         <span className={paceColor(projected)}>
@@ -174,6 +196,23 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       <Text variant="heading3" as="h3" DANGEROUS_className="m-0">
         {t("estTitle")}
       </Text>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <Text variant="secondary" as="span" DANGEROUS_className="text-sm">
+          {t("estRefLabel")}
+        </Text>
+        <select
+          className="rounded-md border border-kumo-line bg-transparent px-2 py-1 text-sm text-kumo-default"
+          value={refModel}
+          onChange={(event) => setRefModel(event.target.value)}
+        >
+          <option value="">{t("estRefAuto")}</option>
+          {refOptions.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+        </select>
+      </div>
       <Text variant="secondary" as="p" DANGEROUS_className="m-0 mt-1 text-sm">
         {t("estHint")}
       </Text>
@@ -240,11 +279,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
             DANGEROUS_className="m-0 mt-2 text-[11px]"
           >
             {t("estPriceFrom", {
-              date: new Date(snapshot.fetchedAt).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              }),
+              date: fmtDMY(new Date(snapshot.fetchedAt)),
               credit: snapshot.monthlyCost,
             })}
           </Text>

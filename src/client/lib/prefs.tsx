@@ -13,6 +13,11 @@ export type Theme = "light" | "dark" | "system";
 
 const LOCALE_KEY = "ogc-locale";
 const THEME_KEY = "ogc-theme";
+const REF_MODEL_KEY = "ogc-ref-model";
+
+function readRefModel(): string {
+  return localStorage.getItem(REF_MODEL_KEY) ?? "";
+}
 
 function readLocale(): Locale {
   const raw = localStorage.getItem(LOCALE_KEY);
@@ -43,8 +48,10 @@ function applyTheme(theme: Theme) {
 interface Prefs {
   locale: Locale;
   theme: Theme;
+  refModel: string;
   setLocale: (locale: Locale) => void;
   setTheme: (theme: Theme) => void;
+  setRefModel: (model: string) => void;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 }
 
@@ -53,6 +60,7 @@ const PrefsContext = createContext<Prefs | null>(null);
 export function PrefsProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(readLocale);
   const [theme, setThemeState] = useState<Theme>(readTheme);
+  const [refModel, setRefModelState] = useState<string>(readRefModel);
 
   useEffect(() => {
     applyTheme(theme);
@@ -78,6 +86,11 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     setThemeState(next);
   }, []);
 
+  const setRefModel = useCallback((next: string) => {
+    localStorage.setItem(REF_MODEL_KEY, next);
+    setRefModelState(next);
+  }, []);
+
   const translate = useCallback(
     (key: MessageKey, vars?: Record<string, string | number>) =>
       t(locale, key, vars),
@@ -85,8 +98,16 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ locale, theme, setLocale, setTheme, t: translate }),
-    [locale, theme, setLocale, setTheme, translate]
+    () => ({
+      locale,
+      theme,
+      refModel,
+      setLocale,
+      setTheme,
+      setRefModel,
+      t: translate,
+    }),
+    [locale, theme, refModel, setLocale, setTheme, setRefModel, translate]
   );
 
   return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;

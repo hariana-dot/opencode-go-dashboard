@@ -143,9 +143,13 @@ export async function fetchUsageOverview(
   return data.overview;
 }
 
-export async function fetchEstimate(id: string): Promise<EstimateResult> {
+export async function fetchEstimate(
+  id: string,
+  ref?: string
+): Promise<EstimateResult> {
+  const suffix = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   const data = await request<{ id: string; estimate: EstimateResult }>(
-    `/api/accounts/${id}/estimate`
+    `/api/accounts/${id}/estimate${suffix}`
   );
   return data.estimate;
 }

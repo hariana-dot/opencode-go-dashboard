@@ -300,6 +300,30 @@ export default function App() {
       >
         {t("footer")}
       </Text>
+      <Text
+        variant="secondary"
+        as="p"
+        DANGEROUS_className="m-0 mt-2 text-center text-xs"
+      >
+        Based on{" "}
+        <a
+          className="underline"
+          href="https://github.com/Ruinique/opencode-go-dashboard"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Ruinique/opencode-go-dashboard
+        </a>{" "}
+        · Live model pricing by{" "}
+        <a
+          className="underline"
+          href="https://github.com/all-the-rest/ocgo-price-tracker"
+          target="_blank"
+          rel="noreferrer"
+        >
+          all-the-rest/ocgo-price-tracker
+        </a>
+      </Text>
     </div>
   );
 }

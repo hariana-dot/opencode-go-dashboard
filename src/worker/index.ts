@@ -158,7 +158,8 @@ async function handleApi(
     /^\/api\/accounts\/([^/]+)\/estimate$/
   );
   if (estimateMatch && request.method === "GET") {
-    return handleEstimate(env, estimateMatch[1]);
+    const ref = new URL(request.url).searchParams.get("ref") ?? "";
+    return handleEstimate(env, estimateMatch[1], ref);
   }
 
   if (url.pathname === "/api/prices/latest" && request.method === "GET") {
@@ -541,7 +542,11 @@ function glmVersionParts(suffix: string): number[] {
   return (suffix.match(/\d+/g) ?? []).map(Number);
 }
 
-async function handleEstimate(env: Env, id: string): Promise<Response> {
+async function handleEstimate(
+  env: Env,
+  id: string,
+  refQuery: string
+): Promise<Response> {
   const row = await getAccountRow(env.DB, id);
   if (!row) return json({ error: "账号不存在" }, 404);
 
@@ -595,6 +600,11 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       return 0;
     });
     refSuffix = glmCandidates[glmCandidates.length - 1];
+  }
+
+  const requestedRef = refQuery ? suffixOf(refQuery) : "";
+  if (requestedRef && !free.has(requestedRef) && pricedRows.has(requestedRef)) {
+    refSuffix = requestedRef;
   }
 
   const { results } = await env.DB.prepare(
