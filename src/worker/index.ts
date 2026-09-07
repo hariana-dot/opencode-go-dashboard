@@ -633,6 +633,17 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     );
   }
 
+  const officialPct = monthly?.usagePercent ?? null;
+  let totalSpend = 0;
+  for (const rec of records) {
+    if (free.has(suffixOf(rec.model))) continue;
+    totalSpend += Number(rec.cost ?? 0) / 1e9;
+  }
+  const poolUsd =
+    officialPct != null && officialPct > 0 && totalSpend > 0
+      ? Math.round((totalSpend / (officialPct / 100)) * 100) / 100
+      : null;
+
   function rowFor(suffix: string): EstimateSpendRow | null {
     const variants = pricedRows.get(suffix);
     if (!variants || variants.length === 0) return null;
@@ -669,6 +680,7 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     recordCount: records.length,
     officialMonthlyPct: monthly?.usagePercent ?? null,
     officialResetInSec: monthly?.resetInSec ?? null,
+    poolUsd,
     rows,
     ref,
   };

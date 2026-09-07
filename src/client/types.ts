@@ -118,6 +118,7 @@ export interface EstimateResult {
   recordCount: number;
   officialMonthlyPct: number | null;
   officialResetInSec: number | null;
+  poolUsd: number | null;
   rows: EstimateSpendRow[];
   ref: EstimateSpendRow | null;
 }

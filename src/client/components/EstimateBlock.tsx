@@ -88,6 +88,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       : 0;
 
   const officialPct = estimate?.officialMonthlyPct ?? null;
+  const poolUsd = estimate?.poolUsd ?? null;
   const officialBar =
     officialPct != null ? Math.min(100, Math.max(0, officialPct)) : 0;
 
@@ -96,8 +97,8 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
   }
 
   function projectedPct(row: EstimateSpendRow): number | null {
-    if (officialPct == null || !(row.usage > 0)) return null;
-    return officialPct + (futureUsd(row) * 100) / row.usage;
+    if (officialPct == null || !poolUsd || !(poolUsd > 0)) return null;
+    return officialPct + (futureUsd(row) * 100) / poolUsd;
   }
 
   function rightLabel(row: EstimateSpendRow): ReactNode {
@@ -105,12 +106,12 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
       return <span className="text-kumo-subtle">—</span>;
     }
     const projected = projectedPct(row);
-    if (projected == null || officialPct == null) {
+    if (projected == null || officialPct == null || !poolUsd) {
       return <span className="text-kumo-subtle">—</span>;
     }
     if (projected > 100) {
-      const pool = ((100 - officialPct) / 100) * row.usage;
-      const daysToCap = pool / row.rate7UsdPerDay;
+      const remainingUsd = ((100 - officialPct) / 100) * poolUsd;
+      const daysToCap = remainingUsd / row.rate7UsdPerDay;
       const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
         localeTag(locale),
         { month: "short", day: "numeric" }
