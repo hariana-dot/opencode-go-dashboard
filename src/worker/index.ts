@@ -36,7 +36,7 @@ import type {
   UsageResult,
 } from "./types";
 
-const SYNC_PAGES_PER_REQUEST = 10;
+const SYNC_PAGES_PER_REQUEST = 3;
 const HISTORY_PAGE_FULL = 40;
 const ESTIMATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;

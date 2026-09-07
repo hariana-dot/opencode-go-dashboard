@@ -10,6 +10,7 @@ import type {
   EstimateRequestRow,
   EstimateResult,
   PriceSnapshotData,
+  UsageSyncResult,
 } from "../types";
 
 const DAY_MS = 86_400_000;
@@ -45,28 +46,34 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    let first: EstimateResult;
     try {
-      let est = await fetchEstimate(accountId);
-      setSyncing(true);
-      const until = new Date(Date.now() - 8 * DAY_MS).toISOString();
-      for (let i = 0; i < SYNC_ROUNDS; i++) {
-        const result = await syncUsageHistory(accountId, until);
-        if (result.error) {
-          setError(result.error);
-          break;
-        }
-        if (result.done) break;
-      }
-      est = await fetchEstimate(accountId);
-      setSyncing(false);
-      setEstimate(est);
+      first = await fetchEstimate(accountId);
+      setEstimate(first);
       setSnapshot(await getPriceSnapshot());
     } catch (err) {
       setError(err instanceof Error ? err.message : t("queryFailed"));
-    } finally {
-      setSyncing(false);
       setLoading(false);
+      return;
     }
+    setLoading(false);
+    setSyncing(true);
+    const until = new Date(Date.now() - 8 * DAY_MS).toISOString();
+    for (let i = 0; i < SYNC_ROUNDS; i++) {
+      let result: UsageSyncResult;
+      try {
+        result = await syncUsageHistory(accountId, until);
+      } catch {
+        break;
+      }
+      if (result.error || result.done) break;
+    }
+    try {
+      setEstimate(await fetchEstimate(accountId));
+    } catch {
+      // keep the first estimate rather than failing the whole block
+    }
+    setSyncing(false);
   }, [accountId, t]);
 
   useEffect(() => {
