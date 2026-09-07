@@ -14,8 +14,8 @@ Self-hosted **OpenCode Go quota dashboard** on Cloudflare Workers + D1.
 
 See **5-hour / weekly / monthly usage**, a **daily cost chart by model**, and **projected usage** at reset — for one account or many.
 
-![OpenCode Go Dashboard](docs/IMG_6547.png)
-![OpenCode Go Dashboard](docs/IMG_6545.png)
+![OpenCode Go Dashboard](docs/IMG_6574.png)
+![OpenCode Go Dashboard](docs/IMG_6576.png)
 
 ---
 
