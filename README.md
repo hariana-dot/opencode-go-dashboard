@@ -1,158 +1,138 @@
 # OpenCode Go Dashboard
 
-OpenCode Go Dashboard 是一个基于 Cloudflare 全技术栈的自托管额度查询面板。它集中展示多个 OpenCode Go 账号的 Rolling / Weekly / Monthly 用量，Auth Cookie 仅保存在服务端 D1，不会返回给浏览器。
+A self-hosted, password-protected dashboard for your [OpenCode Go](https://opencode.ai/docs/go/) subscription, running entirely on [Cloudflare Workers](https://workers.cloudflare.com/) + D1. Track one or many OpenCode Go accounts: official rolling / weekly / monthly meters, a daily cost breakdown by model, and a projected-usage estimate that tells you when your monthly pool will run out.
 
-## 功能预览
+![OpenCode Go Dashboard](docs/screenshot.jpg)
 
-以下截图使用脱敏示例数据，账号名称、Workspace ID 和更新时间已打码处理。
+## Features
 
-![OpenCode Go 额度管理面板](docs/screenshot.jpg)
+- **Official quota meters** — 5-hour rolling, weekly, and monthly windows with live percentages parsed from the OpenCode console.
+- **Multi-account** — add, edit, and delete accounts; refresh one or all at once; near-limit highlighting.
+- **Cost breakdown** — stacked daily cost-by-model chart from your official usage history (`big-pickle` / Zen models are always hidden).
+- **Projected usage** — for every model you use, a bar starting at your current monthly usage with a dotted marker showing where usage lands at reset if the total 7-day request pace continues, priced at that model's rates against the overall remaining pool. The priciest model shows the earliest cap date; you can switch the reference model from any OpenCode Go model in the dropdown.
+- **Live model pricing** — the worker snapshots [ocgo-pricing.all-the.rest](https://ocgo-pricing.all-the.rest) daily (cron) and backfills on load when stale, so allowances and rates stay current.
+- **Incremental sync** — usage history syncs by watermark; the estimate view only walks back the 8 days it needs.
+- **i18n + theming** — English, 简体中文, 繁體中文, 日本語; light / dark / system theme.
+- **Edge everything** — React + Kumo front end, Worker API, D1 storage; one `wrangler deploy`.
 
-## 功能
-
-- 密码保护的管理后台。
-- 多账号增删改查。
-- 一键刷新单个或全部账号额度。
-- 用量接近上限时高亮提示。
-- 部署在 Cloudflare Workers，全球边缘节点访问。
-- 前端 React + Kumo，后端 Worker API，数据存储 D1，一套 `wrangler deploy` 完成部署。
-
-## 快速开始
-
-下面这组命令可以在本地完成构建和预览。生产部署前需要先创建 D1 数据库并配置管理密码。
+## Quick start (local)
 
 ```bash
-git clone https://github.com/Ruinique/opencode-go-dashboard.git
+git clone https://github.com/hariana-dot/opencode-go-dashboard.git
 cd opencode-go-dashboard
 npm install
 cp .dev.vars.example .dev.vars
-# 编辑 .dev.vars，设置 ADMIN_PASSWORD
+# edit .dev.vars and set ADMIN_PASSWORD
 npm run db:migrate:local
 npm run preview
 ```
 
-默认在 `http://localhost:8787` 启动，同时运行 Worker API 和前端静态资源。
+The app runs at `http://localhost:8787` (Worker API + built front end). For front-end-only development with HMR: `npm run dev`.
 
-仅开发前端 UI（不经过 Worker）：
+## Deploy to Cloudflare
 
-```bash
-npm run dev
-```
+Prerequisites: [Node.js](https://nodejs.org/) 20+, a [Cloudflare account](https://dash.cloudflare.com/sign-up), Wrangler v4+.
 
-如果希望让 AI agent 直接帮你部署，可以把下面这段作为提示词发给它：
-
-```text
-请帮我部署 opencode-go-dashboard：从 https://github.com/Ruinique/opencode-go-dashboard.git 克隆项目并安装依赖；登录 Cloudflare（wrangler login）；创建 D1 数据库 opencode-go-dashboard 并把 database_id 写入 wrangler.jsonc；通过 wrangler secret put ADMIN_PASSWORD 设置管理密码；执行 npm run db:migrate:remote 完成迁移；最后运行 npm run deploy 部署到 Cloudflare Workers，并告诉我访问地址。
-```
-
-## 配置
-
-### 前置要求
-
-- [Node.js](https://nodejs.org/) 20+
-- [Cloudflare 账号](https://dash.cloudflare.com/sign-up)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) v4+
-
-### D1 数据库
+### 1. Create the D1 database
 
 ```bash
 npx wrangler login
 npx wrangler d1 create opencode-go-dashboard
 ```
 
-命令会输出 `database_id`，将其填入 `wrangler.jsonc` 中 `d1_databases[0].database_id`，替换默认占位符 `00000000-0000-0000-0000-000000000000`。
+Copy the printed `database_id` into `wrangler.jsonc` → `d1_databases[0].database_id`.
 
-### 环境变量
-
-| 变量 | 含义 | 设置方式 |
-| --- | --- | --- |
-| `ADMIN_PASSWORD` | 管理后台登录密码 | `.dev.vars`（本地）/ `wrangler secret`（生产） |
-
-本地开发：
-
-```bash
-cp .dev.vars.example .dev.vars
-```
-
-编辑 `.dev.vars`：
-
-```env
-ADMIN_PASSWORD=your-strong-password-here
-```
-
-生产环境：
+### 2. Set the admin password
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
 ```
 
-## 部署到 Cloudflare
-
-确保已完成 D1 创建、密码配置和数据库迁移，然后执行：
+### 3. Migrate and deploy
 
 ```bash
-# 生产环境迁移
 npm run db:migrate:remote
-
-# 构建并部署
 npm run deploy
 ```
 
-部署成功后，Wrangler 会输出访问地址，形如 `https://opencode-go-dashboard.<your-subdomain>.workers.dev`。
+Wrangler prints your URL, e.g. `https://opencode-go-dashboard.<your-subdomain>.workers.dev`.
 
-### 绑定自定义域名（可选）
+**Git-integration alternative:** connect the repo to a Workers project in the Cloudflare dashboard with build command `npm run deploy` — it builds, applies remote D1 migrations, and deploys on every push to `main`. In that case set `ADMIN_PASSWORD` under Workers → Settings → Variables & Secrets and fill in your own `database_id` locally (never commit real secrets).
 
-在 `wrangler.jsonc` 中取消注释 `routes` 配置，将 `dashboard.example.com` 替换为你的域名：
+### Custom domain (optional)
 
-```jsonc
-"routes": [
-  {
-    "pattern": "dashboard.example.com",
-    "custom_domain": true
-  }
-]
-```
+Uncomment the `routes` block in `wrangler.jsonc`, point it at a domain in your Cloudflare account, and redeploy.
 
-域名需已在 Cloudflare 账号中，然后重新执行 `npm run deploy`。
+## Usage
 
-## 使用说明
+1. Open the deployed URL and sign in with `ADMIN_PASSWORD`.
+2. **Add account** — you need:
+   - **Display name** — any label.
+   - **Workspace ID** — looks like `wrk_xxx`, from your OpenCode workspace URL.
+   - **Auth cookie** — log in at [opencode.ai](https://opencode.ai), open DevTools → Application → Cookies, copy the value of the `auth` cookie (starts with `Fe26.`).
+3. Hit **Refresh** (one) or **Refresh all** to pull live meters.
+4. Cookies expire; when a meter stops updating, edit the account and paste a fresh cookie.
 
-1. 打开部署后的地址，输入 `ADMIN_PASSWORD` 登录。
-2. 点击「添加账号」，填写：
-   - **显示名称**：便于识别的备注名
-   - **Workspace ID**：格式为 `wrk_xxx`，可在 OpenCode 工作区 URL 中找到
-   - **Auth Cookie**：从浏览器开发者工具中复制 `auth` Cookie 值（以 `Fe26.` 开头）
-3. 点击「刷新」或「全部刷新」获取最新额度。
-4. Cookie 过期后，编辑对应账号并粘贴新的 Cookie。
+Cookies are stored server-side in your D1 database only — they are never returned to the browser.
 
-### 获取 Auth Cookie
+### Reading the projected usage block
 
-1. 在浏览器中登录 [opencode.ai](https://opencode.ai)
-2. 打开开发者工具 → Application（或 Storage）→ Cookies
-3. 找到 `auth` Cookie，复制其值
+- **Bar fill** = your current official monthly usage %.
+- **max $60 / max $30 / …** = that model's monthly dollar allowance from the price snapshot.
+- **Dotted marker** = projected usage at reset: your total 7-day request pace priced at that model's per-request cost, added to the meter and measured against the overall remaining pool (window spend ÷ official usage %).
+- **Right label** = projected spend by reset, or a red cap date (`d/m`) when the projection crosses 100%.
+- **Reference model** = the dropdown under the title; `Auto` picks the latest `glm-*-flash` as a cheap baseline, and any other OpenCode Go model can be selected.
 
-## 项目结构
+## Project structure
 
 ```
 ├── src/
-│   ├── client/          # React 前端
-│   └── worker/          # Cloudflare Worker API
-├── migrations/          # D1 数据库迁移
-├── wrangler.jsonc       # Cloudflare Workers 配置
-├── .dev.vars.example    # 本地环境变量示例
-└── index.html
+│   ├── client/          # React front end (Kumo UI, i18n, prefs)
+│   └── worker/          # Cloudflare Worker API + cron + parsers
+├── migrations/          # D1 schema migrations (0001–0004)
+├── wrangler.jsonc       # Workers config (assets, D1 binding, cron)
+└── .dev.vars.example    # local env example (ADMIN_PASSWORD)
 ```
 
-## 隐私边界
+## Credits
 
-本面板需要你在服务端存储 OpenCode 的 Auth Cookie 才能查询额度。Cookie 具有账号访问权限，请仅部署在受信任的环境中，并使用强密码保护管理后台。不要将 `.dev.vars` 提交到版本控制，也不要在公开场合分享 Cookie 或管理密码。
+- Dashboard base: [Ruinique/opencode-go-dashboard](https://github.com/Ruinique/opencode-go-dashboard)
+- Live OpenCode Go model pricing: [all-the-rest/ocgo-price-tracker](https://github.com/all-the-rest/ocgo-price-tracker) ([ocgo-pricing.all-the.rest](https://ocgo-pricing.all-the.rest))
 
-额度数据来自 opencode.ai Dashboard 页面解析，OpenCode 页面结构变更时可能需要更新代码。
+## Privacy & security
 
-## 许可证
+You must store your OpenCode auth cookie server-side for the meters to work. Deploy only in an environment you trust and protect the dashboard with a strong `ADMIN_PASSWORD`. Never commit `.dev.vars`, and never share cookies or the admin password. Quota data is parsed from the opencode.ai console, so parser updates may be needed if their page changes.
 
-[MIT License](LICENSE)
+## License
 
-## 社区
+[MIT](LICENSE)
 
-本开源项目已链接并认可 [LINUX DO 社区](https://linux.do)。
+---
+
+## 中文说明（简体）
+
+自托管的 OpenCode Go 额度面板：官方 5 小时 / 周度 / 月度用量、按模型划分的每日成本图、以及"预计用量"模块（虚线 = 若整体近 7 天请求节奏按该模型单价折算，月底用量会落在何处；最贵的模型最早触顶）。支持多账号、参考模型切换、四语言界面与明暗主题，`big-pickle` 始终隐藏。
+
+**本地运行**
+
+```bash
+npm install
+cp .dev.vars.example .dev.vars   # 设置 ADMIN_PASSWORD
+npm run db:migrate:local
+npm run preview                  # http://localhost:8787
+```
+
+**部署到 Cloudflare**
+
+```bash
+npx wrangler d1 create opencode-go-dashboard   # 把 database_id 填入 wrangler.jsonc
+npx wrangler secret put ADMIN_PASSWORD
+npm run db:migrate:remote
+npm run deploy
+```
+
+也可在 Cloudflare 控制台把仓库连接到 Workers 项目（构建命令 `npm run deploy`），每次 push 自动构建部署；此时在 Workers → Settings → Variables 中设置 `ADMIN_PASSWORD`。
+
+**添加账号**：Workspace ID（`wrk_xxx`，来自 OpenCode 工作区 URL）+ Auth Cookie（登录 opencode.ai → DevTools → Application → Cookies → 复制 `auth` 的值，以 `Fe26.` 开头）。Cookie 只存于服务端 D1，过期后在账号编辑里更新。
+
+**数据说明**：模型价格快照每日定时取自 ocgo-pricing.all-the.rest，并在过期超过 12 小时时按需回填；用量历史按水位线增量同步。面板基于 Ruinique/opencode-go-dashboard，价格数据由 all-the-rest/ocgo-price-tracker 提供，感谢原作者与数据维护者。
