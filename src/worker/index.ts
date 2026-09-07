@@ -27,7 +27,7 @@ import {
 import type {
   AccountWithUsage,
   CreateAccountBody,
-  EstimateRequestRow,
+  EstimateSpendRow,
   EstimateResult,
   PricingModelRow,
   PricingPayload,
@@ -537,40 +537,6 @@ interface PricedModel {
   peakRanges: [number, number][];
 }
 
-function buildPricedModel(
-  suffix: string,
-  rows: PricingModelRow[],
-  peakHours: Record<string, [number, number][]> | null
-): PricedModel | null {
-  if (rows.length === 0) return null;
-  const usage = Math.max(...rows.map((r) => r.usage ?? 0));
-  if (!(usage > 0)) return null;
-  const peakRows = rows.filter((r) => r.tier === "Peak");
-  const offRows = rows.filter((r) => r.tier === "Off-Peak");
-  const upRows = rows.filter((r) => (r.tier ?? "").startsWith(">"));
-  const baseRows = rows.filter(
-    (r) =>
-      r.tier !== "Peak" && r.tier !== "Off-Peak" && !(r.tier ?? "").startsWith(">")
-  );
-  let threshold = Infinity;
-  if (upRows.length > 0 && baseRows.length > 0) {
-    const match = (upRows[0].tier ?? "").match(/([\d.]+)\s*K/i);
-    threshold = match ? parseFloat(match[1]) * 1000 : Infinity;
-  }
-  const key = suffix.replace(/[^a-z0-9]/g, "");
-  const peakRanges = peakHours?.[key] ?? [];
-  return {
-    suffix,
-    usage,
-    peakRow: peakRows[0] ?? null,
-    offRow: offRows[0] ?? null,
-    baseRow: baseRows[0] ?? rows[0],
-    upRow: upRows[0] ?? null,
-    threshold,
-    peakRanges,
-  };
-}
-
 function glmVersionParts(suffix: string): number[] {
   return (suffix.match(/\d+/g) ?? []).map(Number);
 }
@@ -593,10 +559,6 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
       ? nowMs + monthly.resetInSec * 1000 - ESTIMATE_WINDOW_MS
       : nowMs - ESTIMATE_WINDOW_MS;
   const windowStart = new Date(windowStartMs).toISOString();
-  const daysRemaining = Math.max(
-    0,
-    (windowStartMs + ESTIMATE_WINDOW_MS - nowMs) / DAY_MS
-  );
   const todayUtc = new Date();
   todayUtc.setUTCHours(0, 0, 0, 0);
 
@@ -636,11 +598,11 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   }
 
   const { results } = await env.DB.prepare(
-    `SELECT time_created, model FROM usage_records
+    `SELECT time_created, model, cost FROM usage_records
      WHERE account_id = ? AND time_created >= ?`
   )
     .bind(id, windowStart)
-    .all<{ time_created: string; model: string }>();
+    .all<{ time_created: string; model: string; cost: number }>();
   const records = results ?? [];
 
   const usedSuffixes = new Set<string>();
@@ -654,45 +616,14 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
   const targets = new Set<string>(usedSuffixes);
   if (refSuffix) targets.add(refSuffix);
 
-  const baseCount = new Map<string, Map<string, number>>();
-  const peakCount = new Map<string, Map<string, number>>();
-  const offCount = new Map<string, Map<string, number>>();
-
-  for (const suffix of targets) {
-    const variants = pricedRows.get(suffix) ?? [];
-    const hasTiers =
-      variants.some((r) => r.tier === "Peak") &&
-      variants.some((r) => r.tier === "Off-Peak");
-    if (hasTiers) {
-      peakCount.set(suffix, new Map());
-      offCount.set(suffix, new Map());
-    } else {
-      baseCount.set(suffix, new Map());
-    }
-  }
-
+  const spend = new Map<string, Map<string, number>>();
   for (const rec of records) {
     const suffix = suffixOf(rec.model);
+    if (!targets.has(suffix)) continue;
     const day = rec.time_created.slice(0, 10);
-    const hour = Number(rec.time_created.slice(11, 13)) || 0;
-    const bump = (map: Map<string, Map<string, number>>) => {
-      const days = map.get(suffix);
-      if (!days) return;
-      days.set(day, (days.get(day) ?? 0) + 1);
-    };
-    if (peakCount.has(suffix) && offCount.has(suffix)) {
-      const pm = buildPricedModel(
-        suffix,
-        pricedRows.get(suffix) ?? [],
-        payload?.peakHours ?? null
-      );
-      const inPeak = pm
-        ? pm.peakRanges.some(([from, to]) => hour >= from && hour < to)
-        : false;
-      bump(inPeak ? peakCount : offCount);
-    } else {
-      bump(baseCount);
-    }
+    const days = spend.get(suffix) ?? new Map<string, number>();
+    days.set(day, (days.get(day) ?? 0) + Number(rec.cost ?? 0) / 1e9);
+    spend.set(suffix, days);
   }
 
   const last7Days: string[] = [];
@@ -702,98 +633,35 @@ async function handleEstimate(env: Env, id: string): Promise<Response> {
     );
   }
 
-  function ratePerDay(days: Map<string, number> | undefined): number {
-    if (!days) return 0;
-    let sum = 0;
-    for (const day of last7Days) sum += days.get(day) ?? 0;
-    return Math.round((sum / 7) * 1e4) / 1e4;
+  function rowFor(suffix: string): EstimateSpendRow | null {
+    const variants = pricedRows.get(suffix);
+    if (!variants || variants.length === 0) return null;
+    const usage = Math.max(...variants.map((r) => r.usage ?? 0));
+    if (!(usage > 0)) return null;
+    const days = spend.get(suffix);
+    let sum7 = 0;
+    for (const day of last7Days) sum7 += days?.get(day) ?? 0;
+    return {
+      model: suffix,
+      usage,
+      rate7UsdPerDay: Math.round((sum7 / 7) * 1e4) / 1e4,
+    };
   }
 
-  function requestsMo(row: PricingModelRow, usage: number): number {
-    const p = row.pattern;
-    if (!p) return 0;
-    const cw = row.cachedWrite ?? row.input ?? 0;
-    const input = row.input ?? 0;
-    const read = row.cachedRead ?? 0;
-    const output = row.output ?? 0;
-    const per =
-      ((0.05 * input + 0.95 * cw) * p.input +
-        read * p.cachedRead +
-        output * p.output) /
-      1e6;
-    if (!(per > 0)) return 0;
-    return Math.round((usage / per) * 10) / 10;
-  }
-
-  const rows: EstimateRequestRow[] = [];
+  const rows: EstimateSpendRow[] = [];
   for (const suffix of usedSuffixes) {
-    const variants = pricedRows.get(suffix) ?? [];
-    if (baseCount.has(suffix)) {
-      const modelRow = variants.find(
-        (r) => r.tier !== "Peak" && r.tier !== "Off-Peak"
-      );
-      if (!modelRow) continue;
-      const limit = requestsMo(modelRow, modelRow.usage);
-      if (!(limit > 0)) continue;
-      rows.push({
-        model: suffix,
-        tier: null,
-        requestsMo: limit,
-        rate7PerDay: ratePerDay(baseCount.get(suffix)),
-      });
-    } else {
-      const peakRow = variants.find((r) => r.tier === "Peak");
-      const offRow = variants.find((r) => r.tier === "Off-Peak");
-      if (peakRow) {
-        const limit = requestsMo(peakRow, peakRow.usage);
-        if (limit > 0) {
-          rows.push({
-            model: suffix,
-            tier: "Peak",
-            requestsMo: limit,
-            rate7PerDay: ratePerDay(peakCount.get(suffix)),
-          });
-        }
-      }
-      if (offRow) {
-        const limit = requestsMo(offRow, offRow.usage);
-        if (limit > 0) {
-          rows.push({
-            model: suffix,
-            tier: "Off-Peak",
-            requestsMo: limit,
-            rate7PerDay: ratePerDay(offCount.get(suffix)),
-          });
-        }
-      }
-    }
+    if (suffix === refSuffix) continue;
+    const spendRow = rowFor(suffix);
+    if (spendRow) rows.push(spendRow);
   }
-
-  let ref: EstimateRequestRow | null = null;
-  if (refSuffix) {
-    const refRows = pricedRows.get(refSuffix) ?? [];
-    const refRow =
-      refRows.find((r) => r.tier !== "Peak" && r.tier !== "Off-Peak") ??
-      refRows[0];
-    if (refRow) {
-      const limit = requestsMo(refRow, refRow.usage);
-      if (limit > 0) {
-        ref = {
-          model: refSuffix,
-          tier: null,
-          requestsMo: limit,
-          rate7PerDay: 0,
-        };
-      }
-    }
-  }
-
   rows.sort((a, b) => {
-    const pa = a.rate7PerDay * daysRemaining;
-    const pb = b.rate7PerDay * daysRemaining;
-    if (pb !== pa) return pb - pa;
-    return b.requestsMo - a.requestsMo;
+    if (b.rate7UsdPerDay !== a.rate7UsdPerDay) {
+      return b.rate7UsdPerDay - a.rate7UsdPerDay;
+    }
+    return a.model.localeCompare(b.model);
   });
+
+  const ref = refSuffix ? rowFor(refSuffix) : null;
 
   const estimate: EstimateResult = {
     windowStart,

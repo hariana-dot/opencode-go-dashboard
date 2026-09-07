@@ -7,8 +7,8 @@ import { usageBarColor, usageTextColor } from "../lib/format";
 import { localeTag } from "../lib/i18n";
 import { usePrefs } from "../lib/prefs";
 import type {
-  EstimateRequestRow,
   EstimateResult,
+  EstimateSpendRow,
   PriceSnapshotData,
   UsageSyncResult,
 } from "../types";
@@ -27,12 +27,12 @@ function paceColor(pct: number): string {
   return "text-kumo-success";
 }
 
-function fmtInt(n: number): string {
-  return Math.round(n).toLocaleString("en-US");
+function fmtUsd(n: number): string {
+  return `$${n < 10 ? n.toFixed(2) : n.toFixed(1)}`;
 }
 
-function rowLabel(row: EstimateRequestRow): string {
-  return row.tier ? `${row.model} (${row.tier})` : row.model;
+function rowLabel(row: EstimateSpendRow): string {
+  return row.model;
 }
 
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
@@ -82,7 +82,6 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
 
   const nowMs = Date.now();
   const windowStartMs = estimate ? Date.parse(estimate.windowStart) : NaN;
-  const windowDays = estimate ? estimate.windowLengthMs / DAY_MS : 30;
   const daysRemaining =
     estimate && !Number.isNaN(windowStartMs)
       ? Math.max(0, (windowStartMs + estimate.windowLengthMs - nowMs) / DAY_MS)
@@ -92,32 +91,26 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
   const officialBar =
     officialPct != null ? Math.min(100, Math.max(0, officialPct)) : 0;
 
-  function maxReq(row: EstimateRequestRow): number | null {
-    if (daysRemaining <= 0) return null;
-    return Math.round(row.requestsMo * (daysRemaining / windowDays));
+  function futureUsd(row: EstimateSpendRow): number {
+    return row.rate7UsdPerDay * daysRemaining;
   }
 
-  function futureReq(row: EstimateRequestRow): number {
-    return row.rate7PerDay * daysRemaining;
+  function projectedPct(row: EstimateSpendRow): number | null {
+    if (officialPct == null || !(row.usage > 0)) return null;
+    return officialPct + (futureUsd(row) * 100) / row.usage;
   }
 
-  function projectedPct(row: EstimateRequestRow): number | null {
-    if (officialPct == null || row.requestsMo <= 0) return null;
-    return officialPct + (futureReq(row) * 100) / row.requestsMo;
-  }
-
-  function rightLabel(row: EstimateRequestRow): ReactNode {
-    if (row.rate7PerDay <= 0) {
+  function rightLabel(row: EstimateSpendRow): ReactNode {
+    if (row.rate7UsdPerDay <= 0) {
       return <span className="text-kumo-subtle">—</span>;
     }
     const projected = projectedPct(row);
-    if (projected == null) {
+    if (projected == null || officialPct == null) {
       return <span className="text-kumo-subtle">—</span>;
     }
-    const max = maxReq(row);
-    const future = futureReq(row);
-    if (max != null && future > max) {
-      const daysToCap = max / row.rate7PerDay;
+    if (projected > 100) {
+      const pool = ((100 - officialPct) / 100) * row.usage;
+      const daysToCap = pool / row.rate7UsdPerDay;
       const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
         localeTag(locale),
         { month: "short", day: "numeric" }
@@ -131,27 +124,24 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     }
     return (
       <span className={paceColor(projected)}>
-        {t("estByReset", { n: fmtInt(future) })}
+        {t("estByReset", { n: fmtUsd(futureUsd(row)) })}
       </span>
     );
   }
 
   function BarRow(props: {
-    row: EstimateRequestRow;
+    row: EstimateSpendRow;
     fillColor: string;
   }) {
     const projected = projectedPct(props.row);
-    const max = maxReq(props.row);
     return (
       <div className="mt-2">
         <div className="flex items-center justify-between gap-2 text-[11px]">
           <span className="min-w-0 truncate font-mono text-kumo-default">
             {rowLabel(props.row)}
-            {max != null ? (
-              <span className="ml-1 font-sans text-kumo-subtle">
-                {t("estMaxReq", { n: fmtInt(max) })}
-              </span>
-            ) : null}
+            <span className="ml-1 font-sans text-kumo-subtle">
+              {t("estMaxUsd", { n: fmtUsd(props.row.usage) })}
+            </span>
           </span>
           <span className="shrink-0 tabular-nums">{rightLabel(props.row)}</span>
         </div>
@@ -164,7 +154,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
               />
             ) : null}
           </div>
-          {projected != null && props.row.rate7PerDay > 0 ? (
+          {projected != null && props.row.rate7UsdPerDay > 0 ? (
             <span
               className={`absolute bottom-[-3px] top-[-3px] ${paceColor(projected)}`}
               style={{
@@ -221,7 +211,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
               ) : null}
               {estimate.rows.map((row, index) => (
                 <BarRow
-                  key={`${row.model}-${row.tier ?? "base"}`}
+                  key={row.model}
                   row={row}
                   fillColor={paletteColor(index + 1)}
                 />
