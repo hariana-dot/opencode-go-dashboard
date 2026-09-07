@@ -120,25 +120,11 @@ export async function upsertUsageRecords(
 ): Promise<number> {
   if (items.length === 0) return 0;
   const stmt = db.prepare(
-    `INSERT INTO usage_records (
+    `INSERT OR IGNORE INTO usage_records (
       id, account_id, time_created, model, provider,
       input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
       cache_write_5m_tokens, cache_write_1h_tokens, cost, key_id, session_id, plan
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(account_id, id) DO UPDATE SET
-      time_created = excluded.time_created,
-      model = excluded.model,
-      provider = excluded.provider,
-      input_tokens = excluded.input_tokens,
-      output_tokens = excluded.output_tokens,
-      reasoning_tokens = excluded.reasoning_tokens,
-      cache_read_tokens = excluded.cache_read_tokens,
-      cache_write_5m_tokens = excluded.cache_write_5m_tokens,
-      cache_write_1h_tokens = excluded.cache_write_1h_tokens,
-      cost = excluded.cost,
-      key_id = excluded.key_id,
-      session_id = excluded.session_id,
-      plan = excluded.plan`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const batch = items.map((item) =>
     stmt.bind(
@@ -159,8 +145,12 @@ export async function upsertUsageRecords(
       item.plan
     )
   );
-  await db.batch(batch);
-  return items.length;
+  const results = await db.batch(batch);
+  let inserted = 0;
+  for (const result of results) {
+    inserted += result.meta.changes ?? 0;
+  }
+  return inserted;
 }
 
 function pad(n: number): string {

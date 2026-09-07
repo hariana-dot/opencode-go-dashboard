@@ -373,6 +373,16 @@ async function handleSyncHistory(
 
   const sync = await getUsageSync(env.DB, id);
 
+  const lastSyncedMs = sync.lastSyncedAt ? Date.parse(sync.lastSyncedAt) : NaN;
+  if (
+    sync.oldestSyncedAt &&
+    sync.oldestSyncedAt <= until &&
+    Number.isFinite(lastSyncedMs) &&
+    Date.now() - lastSyncedMs < 60_000
+  ) {
+    return json({ inserted: 0, done: true, lastSyncedAt: sync.lastSyncedAt });
+  }
+
   let inserted = 0;
   let cursor = 0;
   let done = false;
