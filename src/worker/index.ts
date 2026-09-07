@@ -373,6 +373,7 @@ async function handleSyncHistory(
   const sync = await getUsageSync(env.DB, id);
 
   let inserted = 0;
+  let cursor = 0;
   let done = false;
   let oldestSeen: string | null = sync.oldestSyncedAt;
   let lastRecordAt = sync.lastRecordAt;
@@ -381,7 +382,7 @@ async function handleSyncHistory(
       const history = await fetchGoUsageHistory(
         row.workspace_id,
         row.auth_cookie,
-        0,
+        cursor,
         true
       );
       if (history.items.length === 0) {
@@ -398,6 +399,7 @@ async function handleSyncHistory(
       if (pageOldest && (!oldestSeen || pageOldest < oldestSeen)) {
         oldestSeen = pageOldest;
       }
+      cursor += 1;
 
       if (pageOldest && pageOldest <= until) {
         done = true;

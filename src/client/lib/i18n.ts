@@ -98,7 +98,7 @@ const STRINGS = {
     themeSystem: "System",
     estTitle: "Monthly estimate",
     estHint:
-      "Bars start at current monthly usage. Dotted = where this model's 7-day request pace lands by reset. Max = remaining × official monthly request limit.",
+      "Bars start at current monthly usage. Dotted = where your 7-day average request pace lands by reset. Max = monthly request limit × remaining days ÷ 30.",
     estRecords: "{n} requests in window",
     estMaxReq: "max {n} req",
     estByReset: "{n} req by reset",
@@ -197,7 +197,7 @@ const STRINGS = {
     themeSystem: "系统",
     estTitle: "月度估算",
     estHint:
-      "柱线起点为当前月度用量。虚线 = 按该模型近 7 天请求速度推算到月底的位置。上限 = 剩余 × 官方月度请求上限。",
+      "柱线起点为当前月度用量。虚线 = 按近 7 天平均请求数推算到月底的位置。上限 = 月度请求上限 × 剩余天数 ÷ 30。",
     estRecords: "窗口内 {n} 条请求",
     estMaxReq: "上限 {n} 次请求",
     estByReset: "月底前 {n} 次请求",
@@ -296,7 +296,7 @@ const STRINGS = {
     themeSystem: "系統",
     estTitle: "月度估算",
     estHint:
-      "柱線起點為目前月度用量。虛線 = 按該模型近 7 天請求速度推算到月底的位置。上限 = 剩餘 × 官方月度請求上限。",
+      "柱線起點為目前月度用量。虛線 = 按近 7 天平均請求數推算到月底的位置。上限 = 月度請求上限 × 剩餘天數 ÷ 30。",
     estRecords: "視窗內 {n} 條請求",
     estMaxReq: "上限 {n} 次請求",
     estByReset: "月底前 {n} 次請求",
@@ -396,7 +396,7 @@ const STRINGS = {
     themeSystem: "システム",
     estTitle: "月次見積",
     estHint:
-      "バーの起点は現在の月次使用率。点線 = このモデルの直近7日のリクエストペースで期末までに達する位置。上限 = 残り × 公式月次リクエスト上限。",
+      "バーの起点は現在の月次使用率。点線 = 直近7日の平均リクエストペースで期末までに達する位置。上限 = 月次リクエスト上限 × 残り日数 ÷ 30。",
     estRecords: "期間内 {n} リクエスト",
     estMaxReq: "上限 {n} リクエスト",
     estByReset: "リセットまで {n} リクエスト",

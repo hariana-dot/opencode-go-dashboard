@@ -48,8 +48,9 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     try {
       let est = await fetchEstimate(accountId);
       setSyncing(true);
+      const until = new Date(Date.now() - 8 * DAY_MS).toISOString();
       for (let i = 0; i < SYNC_ROUNDS; i++) {
-        const result = await syncUsageHistory(accountId, est.windowStart);
+        const result = await syncUsageHistory(accountId, until);
         if (result.error) {
           setError(result.error);
           break;
@@ -74,24 +75,28 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
 
   const nowMs = Date.now();
   const windowStartMs = estimate ? Date.parse(estimate.windowStart) : NaN;
+  const windowDays = estimate ? estimate.windowLengthMs / DAY_MS : 30;
   const daysRemaining =
     estimate && !Number.isNaN(windowStartMs)
       ? Math.max(0, (windowStartMs + estimate.windowLengthMs - nowMs) / DAY_MS)
       : 0;
 
   const officialPct = estimate?.officialMonthlyPct ?? null;
-  const remaining = officialPct != null ? 100 - officialPct : null;
   const officialBar =
     officialPct != null ? Math.min(100, Math.max(0, officialPct)) : 0;
 
   function maxReq(row: EstimateRequestRow): number | null {
-    if (remaining == null) return null;
-    return Math.round((remaining / 100) * row.requestsMo);
+    if (daysRemaining <= 0) return null;
+    return Math.round(row.requestsMo * (daysRemaining / windowDays));
+  }
+
+  function futureReq(row: EstimateRequestRow): number {
+    return row.rate7PerDay * daysRemaining;
   }
 
   function projectedPct(row: EstimateRequestRow): number | null {
     if (officialPct == null || row.requestsMo <= 0) return null;
-    return officialPct + (row.rate7PerDay * daysRemaining * 100) / row.requestsMo;
+    return officialPct + (futureReq(row) * 100) / row.requestsMo;
   }
 
   function rightLabel(row: EstimateRequestRow): ReactNode {
@@ -102,9 +107,10 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     if (projected == null) {
       return <span className="text-kumo-subtle">—</span>;
     }
-    if (projected > 100) {
-      const rem = remaining ?? 0;
-      const daysToCap = ((rem / 100) * row.requestsMo) / row.rate7PerDay;
+    const max = maxReq(row);
+    const future = futureReq(row);
+    if (max != null && future > max) {
+      const daysToCap = max / row.rate7PerDay;
       const capDate = new Date(nowMs + daysToCap * DAY_MS).toLocaleDateString(
         localeTag(locale),
         { month: "short", day: "numeric" }
@@ -118,7 +124,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
     }
     return (
       <span className={paceColor(projected)}>
-        {t("estByReset", { n: fmtInt(row.rate7PerDay * daysRemaining) })}
+        {t("estByReset", { n: fmtInt(future) })}
       </span>
     );
   }
