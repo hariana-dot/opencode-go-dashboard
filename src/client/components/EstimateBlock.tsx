@@ -144,9 +144,10 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
         </span>
       );
     }
+    const remainingUsd = (poolUsd * (100 - projected)) / 100;
     return (
       <span className={paceColor(projected)}>
-        {t("estByReset", { n: fmtUsd(futureUsd(row)) })}
+        {t("estByReset", { n: fmtUsd(remainingUsd) })}
       </span>
     );
   }
@@ -202,10 +203,9 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
         </Text>
         <select
           className="rounded-md border border-kumo-line bg-transparent px-2 py-1 text-sm text-kumo-default"
-          value={refModel}
+          value={refModel || estimate?.ref?.model || ""}
           onChange={(event) => setRefModel(event.target.value)}
         >
-          <option value="">{t("estRefAuto")}</option>
           {refOptions.map((model) => (
             <option key={model} value={model}>
               {model}
@@ -236,9 +236,8 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
         </Text>
       ) : (
         <>
-          <div className="mt-3 flex flex-wrap gap-x-3 text-[11px] text-kumo-subtle">
-            <span>{t("estRecords", { n: estimate.recordCount })}</span>
-            <span>{t("estLegend")}</span>
+          <div className="mt-3 text-[11px] text-kumo-subtle">
+            {t("estLegend")}
           </div>
 
           {estimate.rows.length > 0 || estimate.ref ? (

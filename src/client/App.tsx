@@ -313,8 +313,14 @@ export default function App() {
           rel="noreferrer"
         >
           Ruinique/opencode-go-dashboard
-        </a>{" "}
-        · Live model pricing by{" "}
+        </a>
+      </Text>
+      <Text
+        variant="secondary"
+        as="p"
+        DANGEROUS_className="m-0 mt-1 text-center text-xs"
+      >
+        Live model pricing by{" "}
         <a
           className="underline"
           href="https://github.com/all-the-rest/ocgo-price-tracker"
