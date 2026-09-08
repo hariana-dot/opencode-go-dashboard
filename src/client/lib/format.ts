@@ -1,5 +1,5 @@
 import type { Locale } from "./i18n";
-import { t } from "./i18n";
+import { localeTag, t } from "./i18n";
 
 export function formatDuration(seconds: number, locale: Locale): string {
   if (seconds < 60) return t(locale, "sec", { n: seconds });
@@ -47,4 +47,20 @@ export function fmtDM(date: Date): string {
 
 export function fmtDMY(date: Date): string {
   return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+}
+
+const ISO_START_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/;
+const OFFSET_END_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
+
+export function parseServerDate(raw: string): Date {
+  if (ISO_START_RE.test(raw) && !OFFSET_END_RE.test(raw)) {
+    return new Date(`${raw.replace(" ", "T")}Z`);
+  }
+  return new Date(raw);
+}
+
+export function fmtDateTime(raw: string, locale: Locale): string {
+  const date = parseServerDate(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return `${fmtDMY(date)}, ${date.toLocaleTimeString(localeTag(locale))}`;
 }

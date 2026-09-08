@@ -10,6 +10,15 @@ import type { PricingPayload } from "./types";
 const LATEST_URL = "https://ocgo-pricing.all-the.rest/data/latest.json";
 const HISTORY_URL = "https://ocgo-pricing.all-the.rest/data/history.json";
 const EXTRA_FREE_SUFFIXES = new Set(["big-pickle"]);
+const ISO_START_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/;
+const OFFSET_END_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
+
+function toUtcIso(raw: string): string {
+  if (ISO_START_RE.test(raw) && !OFFSET_END_RE.test(raw)) {
+    return `${raw.replace(" ", "T")}Z`;
+  }
+  return raw;
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
@@ -51,7 +60,7 @@ async function ingestOne(
   usedSuffixes: Set<string>,
   withPayload: boolean
 ): Promise<boolean> {
-  const fetchedAt = String(data.fetchedAt);
+  const fetchedAt = toUtcIso(String(data.fetchedAt));
   const snapshotDate = fetchedAt.slice(0, 10);
   const inserted = await insertPriceSnapshot(db, {
     fetchedAt,

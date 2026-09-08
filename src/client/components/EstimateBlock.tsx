@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEstimate, getPriceSnapshot, syncUsageHistory } from "../lib/api";
 import { paletteColor } from "../lib/colors";
-import { fmtDM, fmtDMY, usageBarColor, usageTextColor } from "../lib/format";
+import { fmtDM, fmtDateTime, usageBarColor, usageTextColor } from "../lib/format";
 import { usePrefs } from "../lib/prefs";
 import type {
   EstimateResult,
@@ -27,7 +27,8 @@ function paceColor(pct: number): string {
 }
 
 function fmtUsd(n: number): string {
-  return `$${n < 10 ? n.toFixed(2) : n.toFixed(1)}`;
+  const s = n < 10 ? n.toFixed(2) : n.toFixed(1);
+  return `$${s.replace(/\.0+$/, "")}`;
 }
 
 function rowLabel(row: EstimateSpendRow): string {
@@ -41,7 +42,7 @@ function modelSuffix(id: string): string {
 }
 
 export default function EstimateBlock({ accountId, refreshToken }: Props) {
-  const { refModel, setRefModel, t } = usePrefs();
+  const { locale, refModel, setRefModel, t } = usePrefs();
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
   const [snapshot, setSnapshot] = useState<PriceSnapshotData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +137,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
         </span>
       );
     }
-    const remainingUsd = (poolUsd * (100 - projected)) / 100;
+    const remainingUsd = (row.usage * (100 - projected)) / 100;
     return (
       <span className={paceColor(projected)}>
         {t("estByReset", { n: fmtUsd(remainingUsd) })}
@@ -270,13 +271,7 @@ export default function EstimateBlock({ accountId, refreshToken }: Props) {
             DANGEROUS_className="m-0 mt-2 text-[11px]"
           >
             {t("estPriceFrom", {
-              date: `${fmtDMY(new Date(snapshot.fetchedAt))} ${new Date(
-                snapshot.fetchedAt
-              ).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: false,
-              })}`,
+              date: fmtDateTime(snapshot.fetchedAt, locale),
               credit: snapshot.monthlyCost,
             })}
           </Text>

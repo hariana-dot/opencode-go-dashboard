@@ -5,8 +5,7 @@ import {
   PencilSimple,
   Trash,
 } from "@phosphor-icons/react";
-import { localeTag } from "../lib/i18n";
-import { fmtDMY } from "../lib/format";
+import { fmtDateTime } from "../lib/format";
 import { usePrefs } from "../lib/prefs";
 import type { AccountWithUsage } from "../types";
 import CostChart from "./CostChart";
@@ -145,9 +144,7 @@ export default function AccountTable({
                   DANGEROUS_className="m-0 mt-3 text-[11px]"
                 >
                   {t("updatedAt", {
-                    time: `${fmtDMY(new Date(usage.fetchedAt))}, ${new Date(
-                      usage.fetchedAt
-                    ).toLocaleTimeString(localeTag(locale))}`,
+                    time: fmtDateTime(usage.fetchedAt, locale),
                   })}
                 </Text>
               ) : null}
