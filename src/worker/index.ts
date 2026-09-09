@@ -635,20 +635,11 @@ async function handleEstimate(
   const officialPct = monthly?.usagePercent ?? null;
   let totalSpend = 0;
   let totalReq7 = 0;
-  const spend7 = new Map<string, number>();
-  const spendWin = new Map<string, number>();
-  const req7 = new Map<string, number>();
-  const reqWin = new Map<string, number>();
   for (const rec of records) {
     const suffix = suffixOf(rec.model);
     if (free.has(suffix)) continue;
-    const usd = Number(rec.cost ?? 0) / 1e9;
-    totalSpend += usd;
-    reqWin.set(suffix, (reqWin.get(suffix) ?? 0) + 1);
-    spendWin.set(suffix, (spendWin.get(suffix) ?? 0) + usd);
+    totalSpend += Number(rec.cost ?? 0) / 1e9;
     if (last7Days.includes(rec.time_created.slice(0, 10))) {
-      req7.set(suffix, (req7.get(suffix) ?? 0) + 1);
-      spend7.set(suffix, (spend7.get(suffix) ?? 0) + usd);
       totalReq7 += 1;
     }
   }
@@ -677,10 +668,11 @@ async function handleEstimate(
   }
 
   function costPerReq(suffix: string): number {
-    const r7 = req7.get(suffix) ?? 0;
-    if (r7 > 0) return (spend7.get(suffix) ?? 0) / r7;
-    const rw = reqWin.get(suffix) ?? 0;
-    if (rw > 0) return (spendWin.get(suffix) ?? 0) / rw;
+    // One shared basis for every row: each row is a hypothetical "what if
+    // everything ran on this model" scenario, priced at the snapshot
+    // pattern rate (price-source unit prices x standard token mix).
+    // Per-model billed history is intentionally not used, so markers stay
+    // directly comparable and the cheapest unit price stretches furthest.
     return patternCostPerReq(suffix);
   }
 
