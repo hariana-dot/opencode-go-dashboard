@@ -677,6 +677,15 @@ async function handleEstimate(
   }
 
   function costPerReq(suffix: string): number {
+    // Contributor-type models (e.g. muse-spark-1.3-contributor) are a
+    // different type from the regular version (without tag) or the free
+    // version: usage history bills them at the normal (pricier) rate while
+    // quota burns at the discounted contributor rate, so always price them
+    // from the snapshot contributor row instead of billed actuals.
+    if (suffix.endsWith("-contributor")) {
+      const patterned = patternCostPerReq(suffix);
+      if (patterned > 0) return patterned;
+    }
     const r7 = req7.get(suffix) ?? 0;
     if (r7 > 0) return (spend7.get(suffix) ?? 0) / r7;
     const rw = reqWin.get(suffix) ?? 0;
