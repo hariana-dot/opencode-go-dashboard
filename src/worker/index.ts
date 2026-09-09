@@ -607,23 +607,11 @@ async function handleEstimate(
   }
 
   const { results } = await env.DB.prepare(
-    `SELECT time_created, model, cost, input_tokens, output_tokens,
-       reasoning_tokens, cache_read_tokens, cache_write_5m_tokens,
-       cache_write_1h_tokens FROM usage_records
+    `SELECT time_created, model, cost FROM usage_records
      WHERE account_id = ? AND time_created >= ?`
   )
     .bind(id, windowStart)
-    .all<{
-      time_created: string;
-      model: string;
-      cost: number;
-      input_tokens: number;
-      output_tokens: number;
-      reasoning_tokens: number;
-      cache_read_tokens: number;
-      cache_write_5m_tokens: number | null;
-      cache_write_1h_tokens: number | null;
-    }>();
+    .all<{ time_created: string; model: string; cost: number }>();
   const records = results ?? [];
 
   const usedSuffixes = new Set<string>();
@@ -647,39 +635,20 @@ async function handleEstimate(
   const officialPct = monthly?.usagePercent ?? null;
   let totalSpend = 0;
   let totalReq7 = 0;
-  interface TokenMix {
-    n: number;
-    input: number;
-    output: number;
-    read: number;
-    write: number;
-  }
-  const mix7 = new Map<string, TokenMix>();
-  const mixWin = new Map<string, TokenMix>();
-  function addMix(
-    map: Map<string, TokenMix>,
-    suffix: string,
-    rec: (typeof records)[number]
-  ): void {
-    const mix = map.get(suffix) ?? { n: 0, input: 0, output: 0, read: 0, write: 0 };
-    mix.n += 1;
-    mix.input += Number(rec.input_tokens ?? 0);
-    // Reasoning is billed with output; the tracker pattern has no
-    // reasoning bucket, so fold it in to mirror billed cost.
-    mix.output += Number(rec.output_tokens ?? 0) + Number(rec.reasoning_tokens ?? 0);
-    mix.read += Number(rec.cache_read_tokens ?? 0);
-    mix.write +=
-      Number(rec.cache_write_5m_tokens ?? 0) +
-      Number(rec.cache_write_1h_tokens ?? 0);
-    map.set(suffix, mix);
-  }
+  const spend7 = new Map<string, number>();
+  const spendWin = new Map<string, number>();
+  const req7 = new Map<string, number>();
+  const reqWin = new Map<string, number>();
   for (const rec of records) {
     const suffix = suffixOf(rec.model);
     if (free.has(suffix)) continue;
-    totalSpend += Number(rec.cost ?? 0) / 1e9;
-    addMix(mixWin, suffix, rec);
+    const usd = Number(rec.cost ?? 0) / 1e9;
+    totalSpend += usd;
+    reqWin.set(suffix, (reqWin.get(suffix) ?? 0) + 1);
+    spendWin.set(suffix, (spendWin.get(suffix) ?? 0) + usd);
     if (last7Days.includes(rec.time_created.slice(0, 10))) {
-      addMix(mix7, suffix, rec);
+      req7.set(suffix, (req7.get(suffix) ?? 0) + 1);
+      spend7.set(suffix, (spend7.get(suffix) ?? 0) + usd);
       totalReq7 += 1;
     }
   }
@@ -707,35 +676,11 @@ async function handleEstimate(
     return 0;
   }
 
-  function mixCostPerReq(mix: TokenMix | undefined, suffix: string): number {
-    if (!mix || mix.n <= 0) return 0;
-    // Unit prices from the snapshot row; contributor rows carry the
-    // discounted contributor rate here.
-    const variant = (pricedRows.get(suffix) ?? [])[0];
-    if (!variant) return 0;
-    const uIn = variant.input ?? 0;
-    const uOut = variant.output ?? 0;
-    const uRead = variant.cachedRead ?? 0;
-    const uWrite = variant.cachedWrite ?? uIn;
-    const per =
-      ((mix.input / mix.n) * uIn +
-        (mix.write / mix.n) * uWrite +
-        (mix.read / mix.n) * uRead +
-        (mix.output / mix.n) * uOut) /
-      1e6;
-    return per > 0 ? per : 0;
-  }
-
   function costPerReq(suffix: string): number {
-    // One identical basis for every model: the account's own average token
-    // mix repriced at this row's snapshot unit prices (7d, else window),
-    // else the snapshot pattern mix. Billed dollars are never used, so a
-    // discounted type (e.g. muse-spark-1.3-contributor) can never inherit
-    // the regular or free type's rate, and vice versa.
-    const from7d = mixCostPerReq(mix7.get(suffix), suffix);
-    if (from7d > 0) return from7d;
-    const fromWin = mixCostPerReq(mixWin.get(suffix), suffix);
-    if (fromWin > 0) return fromWin;
+    const r7 = req7.get(suffix) ?? 0;
+    if (r7 > 0) return (spend7.get(suffix) ?? 0) / r7;
+    const rw = reqWin.get(suffix) ?? 0;
+    if (rw > 0) return (spendWin.get(suffix) ?? 0) / rw;
     return patternCostPerReq(suffix);
   }
 
